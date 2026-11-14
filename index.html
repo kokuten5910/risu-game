@@ -70,7 +70,7 @@
         height: 100vh; height: 100dvh; overflow: hidden;
       }
       main {
-        max-width: 560px; margin: 0 auto; padding: 16px 14px 40px;
+        max-width: 560px; margin: 0 auto; padding: 14px 14px 20px;
         height: 100%; max-height: 100%; overflow: hidden;
         display: flex; flex-direction: column; width: 100%;
       }
@@ -123,7 +123,7 @@
       /* ゲーム画面：ヘッダーは2行固定。折り返し禁止で、状態変化でも高さ・位置が1pxも動かない */
       .ghead {
         display: flex; flex-direction: column; flex-wrap: nowrap; gap: 6px;
-        margin-bottom: 10px; flex: none;
+        margin-bottom: 8px; flex: none;
         height: 5.375rem; min-height: 5.375rem; max-height: 5.375rem; overflow: hidden;
       }
       .ghead-row { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; overflow: hidden; }
@@ -165,7 +165,7 @@
       .msg {
         height: 5rem; min-height: 5rem; max-height: 5rem; flex: none; overflow: hidden; display: flex; align-items: center;
         border-radius: 10px; padding: 6px 12px; font-size: .9rem; font-weight: 700;
-        background: var(--surface-2); color: var(--ink-soft); margin-bottom: 10px; line-height: 1.5;
+        background: var(--surface-2); color: var(--ink-soft); margin-bottom: 8px; line-height: 1.5;
       }
       .msg.bad { background: var(--danger-soft); color: var(--danger); }
       .msg.good { background: var(--accent-soft); color: var(--accent); }
@@ -175,7 +175,8 @@
       .board-wrap { display: flex; justify-content: center; flex: none; }
       .board {
         flex: none;
-        display: grid; width: min(94vw, 480px); aspect-ratio: 1 / 1;
+        /* 幅基準だけでなく、ヘッダー＋進捗＋メッセージ＋ヒントまでが縦画面に収まるよう高さ基準の上限も効かせる */
+        display: grid; width: min(94vw, 480px, calc(100dvh - 24rem)); aspect-ratio: 1 / 1;
         gap: clamp(3px, 1.1vw, 5px); padding: clamp(7px, 2vw, 11px);
         border-radius: 16px;
         border: 1px solid var(--tray-edge);
@@ -230,22 +231,29 @@
 
       .progress-line {
         text-align: center; font-weight: 700; color: var(--ink-soft); font-size: .9rem;
-        margin: 10px 0 4px; height: 1.5rem; line-height: 1.5rem; overflow: hidden;
+        margin: 6px 0 2px; height: 1.5rem; line-height: 1.5rem; overflow: hidden;
         white-space: nowrap; flex: none;
       }
       .gfoot { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 8px; flex: none; }
 
-      /* 色ごとの進捗（固定高さ：中身が変わっても盤面位置がずれない） */
+      /* 色ごとの進捗（固定高さ：中身が変わっても盤面位置がずれない。チップは必ず1行） */
       .colorbar {
-        height: 7.2rem; min-height: 7.2rem; max-height: 7.2rem; flex: none; overflow: hidden; margin-bottom: 10px;
+        height: 5rem; min-height: 5rem; max-height: 5rem; flex: none; overflow: hidden; margin-bottom: 8px;
         background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
         padding: 8px 10px; box-shadow: var(--shadow);
       }
-      .colorbar-head { display: flex; align-items: center; font-size: .82rem; font-weight: 700; color: var(--ink-soft); margin-bottom: 6px; }
-      #g-left { font-weight: 900; color: var(--accent); }
-      .chips { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
+      .colorbar-head {
+        display: flex; align-items: center; font-size: .82rem; font-weight: 700; color: var(--ink-soft);
+        height: 1.125rem; line-height: 1.125rem; margin-bottom: 4px; white-space: nowrap; overflow: hidden;
+      }
+      #g-left { font-weight: 900; color: var(--accent); white-space: nowrap; }
+      .chips {
+        display: flex; flex-wrap: nowrap; gap: clamp(3px, 1vw, 6px);
+        height: 2.5rem; align-items: flex-end; padding-right: 6px;
+      }
       .chip {
-        width: 34px; height: 34px; border-radius: 9px; position: relative; flex: none;
+        flex: 1 1 0; min-width: 0; max-width: 34px; aspect-ratio: 1 / 1; max-height: 34px;
+        border-radius: 9px; position: relative;
         box-shadow: inset 0 2px 0 rgba(255,255,255,.25), inset 0 0 0 1px rgba(60,40,0,.12), 0 1px 2px var(--tile-drop);
       }
       .chip img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; -webkit-user-drag: none; }
@@ -258,7 +266,7 @@
       .chip.found { outline: 2px solid var(--accent); outline-offset: 1px; }
 
       /* ヒントボタン */
-      .hints { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; flex: none; min-height: 2.5rem; }
+      .hints { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; flex: none; min-height: 2.5rem; }
       .hints .btn { flex: 1 1 30%; min-width: 104px; }
 
       /* ヒントで新しく付いた✘のハイライト */
@@ -800,7 +808,8 @@
 
       function paintAll(){
         var cells = boardEl.children;
-        var sqSize = Math.max(18, Math.floor((Math.min(window.innerWidth * 0.94, 480) / N) * 0.62));
+        var boardW = Math.min(window.innerWidth * 0.94, 480, Math.max(200, window.innerHeight - 384));
+        var sqSize = Math.max(10, Math.floor((boardW / N) * 0.62));
         var xSize = Math.floor(sqSize * 0.8);
         for (var i = 0; i < cells.length; i++){
           var r = parseInt(cells[i].getAttribute("data-r"), 10);
