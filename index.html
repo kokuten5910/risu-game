@@ -367,11 +367,12 @@
       ];
       /* 領域ごとの色：くっきりした原色寄りパレット（色相がはっきり離れた順、最大12色） */
       var VIVID = ["#E53935","#1E6FDB","#FFC400","#2FA84F","#F97316","#7C3AED","#EC4899","#06A5C9","#84CC16","#B45309","#3345B8","#6B7280"];
-      var PALETTES = PUZZLES.map(function(p){
+      function paletteForSize(size){
         var pal = {};
-        "ABCDEFGHIJKL".slice(0, p.size).split("").forEach(function(ch, i){ pal[ch] = VIVID[i]; });
+        "ABCDEFGHIJKL".slice(0, size).split("").forEach(function(ch, i){ pal[ch] = VIVID[i]; });
         return pal;
-      });
+      }
+      var PALETTES = PUZZLES.map(function(p){ return paletteForSize(p.size); });
       /* 色の名前（領域文字 A,B,C… の順。ヒントのメッセージ用） */
       var COLOR_NAMES = ["あか","あお","きいろ","みどり","オレンジ","むらさき","ピンク","みずいろ","きみどり","ちゃいろ","こんいろ","グレー"];
       function colorName(ch){ return COLOR_NAMES[ch.charCodeAt(0) - 65]; }
@@ -530,6 +531,86 @@
             sheetLoading = false;
             rerenderRankings();
           });
+      }
+
+      /* ===== シートから問題を追加で読み込む（失敗しても内蔵6問で遊べる） ===== */
+      /* シートの1行を検証して内蔵形式に変換する。形式がおかしければ null（読み飛ばす） */
+      function parseSheetProblem(row){
+        if (!row || typeof row !== "object") return null;
+        var no = parseInt(row.no, 10);
+        var size = parseInt(row.size, 10);
+        if (!isFinite(no) || no < 1) return null;
+        if (!isFinite(size) || size < 4 || size > 12) return null;
+        if (typeof row.map !== "string" || typeof row.solution !== "string") return null;
+        var mapRows = row.map.split("/");
+        if (mapRows.length !== size) return null;
+        var letters = "ABCDEFGHIJKL".slice(0, size);
+        var seenColor = {}, r, c, i;
+        for (r = 0; r < size; r++){
+          if (mapRows[r].length !== size) return null;
+          for (c = 0; c < size; c++){
+            var ch = mapRows[r].charAt(c);
+            if (letters.indexOf(ch) < 0) return null;
+            seenColor[ch] = true;
+          }
+        }
+        for (i = 0; i < size; i++) if (!seenColor[letters.charAt(i)]) return null; // 全色そろっていること
+        var parts = row.solution.split(";");
+        if (parts.length !== size) return null;
+        var sol = [], usedR = {}, usedC = {}, usedColor = {};
+        for (i = 0; i < parts.length; i++){
+          var m = /^\s*(\d+)\s*,\s*(\d+)\s*$/.exec(parts[i]);
+          if (!m) return null;
+          var rr = parseInt(m[1], 10) - 1, cc = parseInt(m[2], 10) - 1;
+          if (rr < 0 || rr >= size || cc < 0 || cc >= size) return null;
+          if (usedR[rr] || usedC[cc]) return null;
+          usedR[rr] = true; usedC[cc] = true;
+          var col = mapRows[rr].charAt(cc);
+          if (usedColor[col]) return null;
+          usedColor[col] = true;
+          sol.push([rr, cc]);
+        }
+        for (var a = 0; a < sol.length; a++) for (var b = a + 1; b < sol.length; b++){
+          if (Math.abs(sol[a][0] - sol[b][0]) <= 1 && Math.abs(sol[a][1] - sol[b][1]) <= 1) return null; // 隣接はルール違反
+        }
+        return { no: no, name: "問題" + no, size: size, map: mapRows, sol: sol };
+      }
+
+      /* 検証を通った問題を no の小さい順に内蔵問題の後ろへ追加する。1問でも追加できたら true */
+      function addSheetProblems(list){
+        if (!Array.isArray(list)) return false;
+        var existing = {};
+        PUZZLES.forEach(function(p){ existing[p.name] = true; });
+        var parsed = [];
+        list.forEach(function(row){
+          var p = parseSheetProblem(row);
+          if (p && !existing[p.name]){ existing[p.name] = true; parsed.push(p); }
+        });
+        if (!parsed.length) return false;
+        parsed.sort(function(a, b){ return a.no - b.no; });
+        parsed.forEach(function(p){
+          delete p.no;
+          PUZZLES.push(p);
+          PALETTES.push(paletteForSize(p.size));
+          var idx = PUZZLES.length - 1;
+          if (!rankings[idx]) rankings[idx] = [];
+          if (sheetRankings && !sheetRankings[idx]) sheetRankings[idx] = [];
+        });
+        return true;
+      }
+
+      /* 起動時に問題リストを取得する。追加できたら問題一覧を描き直す */
+      function loadSheetProblems(){
+        fetchTimeout(SHEET_URL + "?type=problems", { method: "GET" }, 10000)
+          .then(function(res){
+            if (!res || !res.ok) throw new Error("http");
+            return res.json();
+          })
+          .then(function(data){
+            if (!data || data.ok !== true) return;
+            if (addSheetProblems(data.problems) && $("view-list") && !$("view-list").classList.contains("hidden")) renderList();
+          })
+          .catch(function(){ /* 取得できなくても内蔵6問のまま遊べる */ });
       }
 
       /* シート取得後に、表示中のランキングだけ描き直す */
@@ -1227,6 +1308,7 @@
       window.addEventListener("resize", function(){ if (cur >= 0) paintAll(); });
 
       renderList();
+      loadSheetProblems();
     </script>
   </body>
 </html>
