@@ -32,6 +32,10 @@
         --tray-edge: #b89f6d;
         --tile-drop: rgba(84,62,18,.30);
         --shadow: 0 2px 10px rgba(70,58,20,.12);
+        --gold-bg: #ffedb0;
+        --gold-line: #dfa008;
+        --gold-ink: #5c3d00;
+        --gold-glow: rgba(223,160,8,.35);
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -54,6 +58,10 @@
           --tray-edge: #23221a;
           --tile-drop: rgba(0,0,0,.45);
           --shadow: 0 2px 10px rgba(0,0,0,.4);
+          --gold-bg: #4d3a08;
+          --gold-line: #d9a400;
+          --gold-ink: #ffe9a8;
+          --gold-glow: rgba(217,164,0,.3);
         }
       }
       html {
@@ -319,6 +327,42 @@
       .rank ol { margin: 0; padding-left: 1.5em; line-height: 1.9; font-size: .92rem; font-variant-numeric: tabular-nums; }
       .rank .empty { color: var(--ink-soft); font-size: .88rem; }
       .rank .mine { font-weight: 900; }
+      /* ランキング1位の行：王冠マーク＋金色の強調（自分の記録かどうかは問わない。同点1位も全員対象） */
+      .rank ol li.rank-top {
+        background: var(--gold-bg); color: var(--gold-ink);
+        border: 1px solid var(--gold-line); border-radius: 10px;
+        font-weight: 900; padding: 3px 10px; margin: 4px 0;
+        box-shadow: 0 0 0 3px var(--gold-glow);
+      }
+      .rank .crown { margin-right: 2px; }
+
+      /* 最高記録のお祝いバナー：クリアパネルの中だけに出す（盤面側のレイアウトは動かさない） */
+      .celebrate {
+        margin: 10px 0 12px; padding: 16px 12px 14px; text-align: center;
+        background: var(--gold-bg); color: var(--gold-ink);
+        border: 2px solid var(--gold-line); border-radius: 14px;
+        box-shadow: 0 0 0 4px var(--gold-glow), var(--shadow);
+      }
+      .celebrate.show { animation: celeb-pop .55s ease-out; transform-origin: 50% 60%; }
+      @keyframes celeb-pop {
+        0% { transform: scale(.78); opacity: 0; }
+        55% { transform: scale(1.07); opacity: 1; }
+        75% { transform: scale(.97); }
+        100% { transform: scale(1); opacity: 1; }
+      }
+      .celebrate-confetti {
+        display: flex; justify-content: space-between; padding: 0 6px;
+        font-size: 1.15rem; line-height: 1; pointer-events: none;
+      }
+      .celebrate.show .celebrate-confetti span { display: inline-block; animation: celeb-bob .8s ease-in-out infinite alternate; }
+      .celebrate.show .celebrate-confetti span:nth-child(2n) { animation-delay: .18s; }
+      .celebrate.show .celebrate-confetti span:nth-child(3n) { animation-delay: .36s; }
+      @keyframes celeb-bob { from { transform: translateY(0) rotate(-8deg); } to { transform: translateY(-6px) rotate(8deg); } }
+      .celebrate-title { font-size: 2rem; font-weight: 900; line-height: 1.25; letter-spacing: .02em; margin-top: 6px; }
+      .celebrate-sub { font-size: 1.08rem; font-weight: 900; line-height: 1.5; margin-top: 2px; }
+      @media (prefers-reduced-motion: reduce) {
+        .celebrate.show, .celebrate.show .celebrate-confetti span { animation: none; }
+      }
       .btn:disabled { opacity: .55; cursor: default; }
       #reg-status { color: var(--danger); font-size: .82rem; }
       .hidden { display: none !important; }
@@ -380,6 +424,11 @@
 
         <div class="panel hidden" id="panel-clear">
           <h2>🎉 クリア！</h2>
+          <div class="celebrate hidden" id="clear-banner" role="status" aria-live="polite">
+            <div class="celebrate-confetti" aria-hidden="true"><span>🎉</span><span>✨</span><span>🎊</span><span>✨</span><span>🎉</span></div>
+            <div class="celebrate-title" id="clear-banner-title">🏆 最高記録！</div>
+            <div class="celebrate-sub" id="clear-banner-sub"></div>
+          </div>
           <p><span id="clear-pname">問題1</span> のタイムは <span class="big-time" id="clear-time">0:00</span> でした。</p>
           <p>ヒント：<span id="clear-hints" style="font-weight:900">ヒントなし</span></p>
           <div class="regrow" id="reg-row">
@@ -633,11 +682,39 @@
         });
       }
 
+      /* シート取得の完了待ちコールバック（最高記録の判定は取得が終わってから行うため） */
+      var sheetCallbacks = [];
+      function drainSheetCallbacks(){
+        var cbs = sheetCallbacks;
+        sheetCallbacks = [];
+        cbs.forEach(function(cb){ try { cb(); } catch (e) {} });
+      }
+
+      /* 登録した自分の記録がその問題の最速（同点含む）なら、クリア画面にお祝いバナーを大きく出す。
+         判定は表示用ランキング（シート＋画面内の合算）で行うので、シート取得失敗時も画面内だけで判定できる */
+      function updateClearBanner(idx, entry){
+        var banner = $("clear-banner");
+        if (!banner || !entry || idx < 0) return;
+        var list = displayList(idx);
+        if (!list.length || entry.sec > list[0].sec + 1e-9){
+          banner.classList.add("hidden");
+          banner.classList.remove("show");
+          return;
+        }
+        $("clear-banner-title").textContent = "🏆 最高記録！";
+        $("clear-banner-sub").textContent = PUZZLES[idx].name + "で1位！ お見事！";
+        banner.classList.remove("hidden");
+        banner.classList.remove("show");
+        void banner.offsetWidth; // 表示のたびにポヨン演出を再生する
+        banner.classList.add("show");
+      }
+
       /* シートからランキングを取得する（短時間の連続表示では再取得しない） */
-      function refreshSheetRankings(force){
+      function refreshSheetRankings(force, onDone){
+        if (typeof onDone === "function") sheetCallbacks.push(onDone);
         var now = Date.now();
-        if (sheetLoading) return;
-        if (!force && sheetLastTry && now - sheetLastTry < 8000) return;
+        if (sheetLoading) return; // 取得中なら完了時にコールバックをまとめて呼ぶ
+        if (!force && sheetLastTry && now - sheetLastTry < 8000){ drainSheetCallbacks(); return; }
         sheetLastTry = now;
         sheetLoading = true;
         fetchTimeout(SHEET_URL, { method: "GET" }, 8000)
@@ -670,6 +747,7 @@
           .then(function(){
             sheetLoading = false;
             rerenderRankings();
+            drainSheetCallbacks();
           });
       }
 
@@ -769,11 +847,17 @@
       function rankHTML(idx, highlight){
         var list = displayList(idx);
         if (!list.length) return '<p class="empty">まだ記録がありません。最初の記録を作ろう！</p>';
+        var bestSec = list[0].sec;
         var h = "<ol>";
         list.forEach(function(e, i){
           var hintLabel = "";
           if (typeof e.hints === "number") hintLabel = e.hints === 0 ? " ／ ヒントなし" : " ／ ヒント" + e.hints + "回";
-          h += "<li" + (highlight && highlight.name === e.name && highlight.sec === e.sec ? ' class="mine"' : "") + ">"
+          var isTop = e.sec <= bestSec + 1e-9; // 同点で並んだ記録も全て1位として強調する
+          var classes = [];
+          if (isTop) classes.push("rank-top");
+          if (highlight && highlight.name === e.name && highlight.sec === e.sec) classes.push("mine");
+          h += "<li" + (classes.length ? ' class="' + classes.join(" ") + '"' : "") + ">"
+            + (isTop ? '<span class="crown" aria-hidden="true">🏆</span>' : "")
             + escapeHtml(e.name) + " — " + fmt(e.sec) + hintLabel + "</li>";
         });
         return h + "</ol>";
@@ -814,6 +898,8 @@
         regBtn0.disabled = false;
         regBtn0.textContent = "ランキングに登録";
         $("panel-clear").classList.add("hidden");
+        $("clear-banner").classList.add("hidden");
+        $("clear-banner").classList.remove("show");
         $("panel-fail").classList.add("hidden");
         $("g-pname").textContent = p.name + "（" + N + "×" + N + "）";
         setMsg("ダブルタップでリスを置いてみよう。1マスだけの色は確定だよ", "");
@@ -1422,6 +1508,9 @@
         rankings[problemIdx].sort(function(a, b){ return a.sec - b.sec; });
         registered = true;
         lastClearEntry = entry;
+        /* 判定が終わるまでお祝いバナーは出さない */
+        $("clear-banner").classList.add("hidden");
+        $("clear-banner").classList.remove("show");
         /* シートへも登録する。送信中はボタンを無効化し、終わるまでは完了表示にしない */
         var btn = $("btn-register");
         var statusEl = $("reg-status");
@@ -1443,7 +1532,14 @@
             $("clear-rank").innerHTML = "<h3>" + PUZZLES[problemIdx].name + " のランキング</h3>" + rankHTML(problemIdx, entry);
             renderGameRank();
           }
-          if (sheetOk) refreshSheetRankings(true);
+          /* 最高記録の判定はランキング取得が終わってから。シート送信に失敗したときは画面内ランキングで判定する */
+          if (sheetOk){
+            refreshSheetRankings(true, function(){
+              if (cur === problemIdx && !$("panel-clear").classList.contains("hidden")) updateClearBanner(problemIdx, entry);
+            });
+          } else if (cur === problemIdx){
+            updateClearBanner(problemIdx, entry);
+          }
         }
         fetchTimeout(SHEET_URL, {
           method: "POST",
