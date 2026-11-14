@@ -416,6 +416,56 @@
         try { window.localStorage.setItem(NAME_KEY, n); } catch (e) { /* 保存できなくても登録は続ける */ }
       }
 
+      /* クリア進捗をこの端末に覚える（問題番号で保存するので、シートから問題が増えてもずれない） */
+      var PROGRESS_KEY = "risu-cleared-problems";
+      function problemNoOf(p){
+        var m = /(\d+)/.exec(p && p.name ? p.name : "");
+        return m ? parseInt(m[1], 10) : null;
+      }
+      function loadClearedNos(){
+        try {
+          var raw = window.localStorage.getItem(PROGRESS_KEY);
+          if (!raw) return [];
+          var arr = JSON.parse(raw);
+          if (!Array.isArray(arr)) return [];
+          var seen = {}, out = [];
+          arr.forEach(function(v){
+            var n = parseInt(v, 10);
+            if (isFinite(n) && n >= 1 && !seen[n]){ seen[n] = true; out.push(n); }
+          });
+          return out;
+        } catch (e) { return []; }
+      }
+      function saveClearedNos(nos){
+        try { window.localStorage.setItem(PROGRESS_KEY, JSON.stringify(nos)); } catch (e) { /* 保存できなくてもゲームは続ける */ }
+      }
+      /* 保存されたクリア実績から clearedFlag と解放状態を復元する（既存の解放を縮めない） */
+      function applyProgress(){
+        var nos = loadClearedNos();
+        if (!nos.length) return;
+        var maxNo = 0;
+        nos.forEach(function(no){
+          if (no > maxNo) maxNo = no;
+          PUZZLES.forEach(function(p, i){ if (problemNoOf(p) === no) clearedFlag[i] = true; });
+        });
+        var shouldUnlock = Math.min(PUZZLES.length, maxNo + 1);
+        if (shouldUnlock > unlocked) unlocked = shouldUnlock;
+      }
+      /* クリアした瞬間に、問題番号を即時保存する */
+      function recordClear(idx){
+        var no = problemNoOf(PUZZLES[idx]);
+        clearedFlag[idx] = true;
+        if (idx + 2 > unlocked) unlocked = Math.min(PUZZLES.length, idx + 2);
+        if (no == null) return;
+        if (no + 1 > unlocked) unlocked = Math.min(PUZZLES.length, no + 1);
+        var nos = loadClearedNos();
+        if (nos.indexOf(no) < 0){
+          nos.push(no);
+          nos.sort(function(a, b){ return a - b; });
+          saveClearedNos(nos);
+        }
+      }
+
       function fmt(sec){
         var m = Math.floor(sec / 60), s = Math.floor(sec % 60);
         return m + ":" + (s < 10 ? "0" : "") + s;
@@ -596,6 +646,8 @@
           if (!rankings[idx]) rankings[idx] = [];
           if (sheetRankings && !sheetRankings[idx]) sheetRankings[idx] = [];
         });
+        /* 問題が増えても、保存済みのクリア実績・解放状態は番号ベースでそのまま維持する */
+        applyProgress();
         return true;
       }
 
@@ -855,8 +907,7 @@
       function onAllPlaced(){
         playing = false; stopTimer();
         elapsed = (Date.now() - startAt) / 1000;
-        clearedFlag[cur] = true;
-        if (cur + 2 > unlocked) unlocked = Math.min(PUZZLES.length, cur + 2);
+        recordClear(cur);
         setMsg("ぜんぶ見つけた！ お見事！", "good");
         $("clear-pname").textContent = PUZZLES[cur].name;
         $("clear-time").textContent = fmt(elapsed);
@@ -1307,6 +1358,7 @@
 
       window.addEventListener("resize", function(){ if (cur >= 0) paintAll(); });
 
+      applyProgress();
       renderList();
       loadSheetProblems();
     </script>
