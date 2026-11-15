@@ -778,6 +778,22 @@
       var COLOR_NAMES = ["あか","あお","きいろ","みどり","オレンジ","むらさき","ピンク","みずいろ","きみどり","ちゃいろ","こんいろ","グレー"];
       function colorName(ch){ return COLOR_NAMES[ch.charCodeAt(0) - 65]; }
       function colorLetters(){ return "ABCDEFGHIJKL".slice(0, N).split(""); }
+      /* 位置の言い方：端は「一番上／一番下／一番左／一番右」。それ以外は上からと下から
+         （左からと右から）で近い方の数え方を使い、同数なら上から／左からにする */
+      function rowLabel(r){
+        if (r === 0) return "一番上の横列";
+        if (r === N - 1) return "一番下の横列";
+        var fromBottom = N - r;
+        if (fromBottom < r + 1) return "下から" + fromBottom + "番目の横列";
+        return "上から" + (r + 1) + "番目の横列";
+      }
+      function colLabel(c){
+        if (c === 0) return "一番左の縦列";
+        if (c === N - 1) return "一番右の縦列";
+        var fromRight = N - c;
+        if (fromRight < c + 1) return "右から" + fromRight + "番目の縦列";
+        return "左から" + (c + 1) + "番目の縦列";
+      }
 
       /* ================= 状態 ================= */
       var unlocked = 1;               // 解放済みの問題数（問題1は最初から）
@@ -810,6 +826,8 @@
       var popKey = null;              // 置いた瞬間の1匹だけポヨンさせる対象マス "r,c"（描画したら消す）
       var hintPulse = {};             // ヒントで付けた✘のうち、いま光っている（脈打ち＋💡）マス "r,c" -> true
       var hintFrame = {};             // ヒントで付けた✘のマス "r,c" -> true（操作後は細い金枠だけ残す）
+      var hintFocus = null;           // 直近の変化（ヒントで付けた✘／置かれたリス）のマスと、その色・横列・縦列。
+                                      // 論理ヒントのティア内並び替えで「前の結果からつながる推理」を優先するために使う
 
       var $ = function(id){ return document.getElementById(id); };
       var boardEl = $("board");
@@ -1271,6 +1289,7 @@
         for (var r = 0; r < N; r++){ cellState.push(new Array(N).fill(0)); }
         hearts = 3; placed = 0; playing = true; registered = false; hintCount = 0; hintPenalty = 0; clearOfficialSec = 0; lastClearEntry = null;
         hintPulse = {}; hintFrame = {};
+        hintFocus = null;
         renderPenalty(false);
         $("reg-name").value = loadName();
         $("reg-row").classList.remove("hidden");
@@ -1305,7 +1324,7 @@
         var html = "";
         for (var r = 0; r < N; r++){
           for (var c = 0; c < N; c++){
-            html += '<div class="cell' + tileInkClass(pal[region[r][c]]) + '" role="button" aria-label="' + '上から' + (r + 1) + '番目、左から' + (c + 1) + '番目" data-r="' + r + '" data-c="' + c + '" style="background:' + pal[region[r][c]] + '"></div>';
+            html += '<div class="cell' + tileInkClass(pal[region[r][c]]) + '" role="button" aria-label="' + rowLabel(r) + '、' + colLabel(c) + '" data-r="' + r + '" data-c="' + c + '" style="background:' + pal[region[r][c]] + '"></div>';
           }
         }
         boardEl.innerHTML = html;
@@ -1478,6 +1497,7 @@
       /* リスを置く共通処理（自動✘・ポヨン・チップ更新まで） */
       function placeSquirrelAt(r, c){
         settleHintMarks(); // リス配置も「盤面の操作」：ヒントの光を止めて金枠だけ残す
+        setHintFocus([[r, c]]); // 置かれたリスを、次に出す推理の起点にする
         cellState[r][c] = 3;
         placed++;
         recomputeAuto();
@@ -1512,6 +1532,7 @@
 
       function removeSquirrel(r, c){
         if (!playing) return;
+        hintFocus = null; // 取り消したら、次に出す推理の起点も消す
         cellState[r][c] = 0;
         placed--;
         recomputeAuto();
@@ -1574,9 +1595,24 @@
         }
       }
 
+      /* 直近の変化（ヒントの✘／置かれたリス）を記録する。論理ヒントは、この変化と
+         色・横列・縦列・隣接でつながる推理をティア内で優先し、推理の流れをつなげる */
+      function setHintFocus(cells){
+        if (!cells || !cells.length){ return; }
+        var f = { colors: {}, rows: {}, cols: {}, cells: [] };
+        cells.forEach(function(rc){
+          f.cells.push([rc[0], rc[1]]);
+          f.colors[region[rc[0]][rc[1]]] = true;
+          f.rows[rc[0]] = true;
+          f.cols[rc[1]] = true;
+        });
+        hintFocus = f;
+      }
+
       /* ヒントで決めた✘を付けて、理由を表示する。理由文が指すマス＝目印の対象（付けた✘すべて） */
       function applyHintXs(list, reason){
         list.forEach(function(rc){ cellState[rc[0]][rc[1]] = 1; });
+        setHintFocus(list);
         markHintCells(list);
         paintAll();
         setMsg("論理ヒント：" + reason, "");
@@ -1651,157 +1687,656 @@
         return aborted ? null : false;
       }
 
-      /* (r,c) にリスを仮置きしたとき、候補が消えてしまう色・行・列を軽い伝播で探す（背理法の理由文用） */
-      function contradictionText(r, c){
-        var myColor = region[r][c];
-        var found = foundColorSet();
-        function blocked(rr, cc){
+      /* (r,c) にリスを仮置きしたとき、盤面が完成できなくなる具体的な理由を探す（背理法の理由文用）。
+         戻り値は { text, steps, tier, targetType, targetKey }。text は理由の続き（呼び出し側で「ここに置くと、〜から✘だよ」とつなぐ）。
+         targetType/targetKey は候補ゼロになった対象（色／横列／縦列）で、ヒントのティア内並び替えに使う。
+         ①直接理由（tier 0, steps 0）：仮置きの消去（同じ横列・縦列・同色・周囲8マス）だけで候補がゼロになる対象を、
+           そのマスと関係する対象に限らず、全ての色・全ての横列・全ての縦列から探す。
+           すでにリスがいる色・横列・縦列は「置く必要がない」ので対象から外す。
+         ②連鎖理由（tier 1, steps 1〜3）：直接で見つからない場合、候補が1つだけになった色・横列・縦列は
+           「そこに置くしかない」として強制配置し、その消去を繰り返し伝播させる。
+           途中で候補ゼロの対象が出たら、そこまでの強制配置を最初から順に全部文に含める
+           （最後の1手だけを見せると盤面から検証できないため）。矛盾までに強制配置が
+           3ステップを超える場合は tier 3 を返し、その✘は採用しない（呼び出し側で別の✘を探す）。
+         ③①②のどちらでも理由が作れない場合だけ、汎用の「盤面が完成できなくなっちゃう」を返す（tier 2）。
+         理由に書く対象はすべて伝播で実際に確認できたものだけ（推測で名指ししない） */
+      function contradictionInfo(r, c){
+        var basePlaced = [], pr, pc;
+        for (pr = 0; pr < N; pr++) for (pc = 0; pc < N; pc++)
+          if (cellState[pr][pc] === 3) basePlaced.push([pr, pc]);
+        var placedList = basePlaced.concat([[r, c]]); // 確定済みのリス＋仮置き
+        /* placed に置かれたリスたちによって (rr,cc) が候補から消えるか
+           （✘・リス済みのマス／同じ横列・縦列・同色／周囲8マスのいずれか） */
+        function isElim(rr, cc, placed){
           if (cellState[rr][cc] !== 0) return true;
-          if (rr === r || cc === c) return true;
-          if (region[rr][cc] === myColor) return true;
-          if (Math.abs(rr - r) <= 1 && Math.abs(cc - c) <= 1) return true;
+          for (var i = 0; i < placed.length; i++){
+            var p = placed[i];
+            if (rr === p[0] || cc === p[1]) return true;
+            if (region[rr][cc] === region[p[0]][p[1]]) return true;
+            if (Math.abs(rr - p[0]) <= 1 && Math.abs(cc - p[1]) <= 1) return true;
+          }
           return false;
         }
-        var letters = colorLetters(), i, rr, cc, any;
-        for (i = 0; i < letters.length; i++){
-          var ch = letters[i];
-          if (ch === myColor || found[ch]) continue;
-          any = false;
-          for (rr = 0; rr < N && !any; rr++) for (cc = 0; cc < N; cc++)
-            if (region[rr][cc] === ch && !blocked(rr, cc)){ any = true; break; }
-          if (!any) return colorName(ch) + "のリスが置けなくなっちゃう";
+        /* placed を前提にしたときの、未確定の色・横列・縦列ごとの候補マス */
+        function computeDomains(placed){
+          var assignedColor = {}, rowHas = {}, colHas = {};
+          placed.forEach(function(p){
+            assignedColor[region[p[0]][p[1]]] = true; rowHas[p[0]] = true; colHas[p[1]] = true;
+          });
+          var colorDom = {}, rowDom = {}, colDom = {}, rr, cc;
+          colorLetters().forEach(function(ch){
+            if (assignedColor[ch]) return;
+            var arr = [];
+            for (rr = 0; rr < N; rr++) for (cc = 0; cc < N; cc++)
+              if (region[rr][cc] === ch && !isElim(rr, cc, placed)) arr.push([rr, cc]);
+            colorDom[ch] = arr;
+          });
+          for (rr = 0; rr < N; rr++){
+            if (rowHas[rr]) continue;
+            var a2 = [];
+            for (cc = 0; cc < N; cc++) if (!isElim(rr, cc, placed)) a2.push([rr, cc]);
+            rowDom[rr] = a2;
+          }
+          for (cc = 0; cc < N; cc++){
+            if (colHas[cc]) continue;
+            var a3 = [];
+            for (rr = 0; rr < N; rr++) if (!isElim(rr, cc, placed)) a3.push([rr, cc]);
+            colDom[cc] = a3;
+          }
+          return { colorDom: colorDom, rowDom: rowDom, colDom: colDom };
         }
-        for (rr = 0; rr < N; rr++){
-          if (rr === r) continue;
-          any = false;
-          for (cc = 0; cc < N; cc++)
-            if (cellState[rr][cc] === 0 && !blocked(rr, cc)){ any = true; break; }
-          if (!any) return "上から" + (rr + 1) + "番目の横列のリスが置けなくなっちゃう";
+        /* 候補がゼロになった対象（呼び名「〜のリス」＋種別とキー。ティア内の並び替えに使う）。なければ null */
+        function findZero(dom){
+          var letters = colorLetters(), i, ks;
+          for (i = 0; i < letters.length; i++){
+            var ch = letters[i];
+            if (ch in dom.colorDom && dom.colorDom[ch].length === 0)
+              return { label: colorName(ch) + "のリス", type: "color", tkey: ch };
+          }
+          ks = Object.keys(dom.rowDom).map(Number).sort(function(a, b){ return a - b; });
+          for (i = 0; i < ks.length; i++)
+            if (dom.rowDom[ks[i]].length === 0)
+              return { label: rowLabel(ks[i]) + "のリス", type: "row", tkey: ks[i] };
+          ks = Object.keys(dom.colDom).map(Number).sort(function(a, b){ return a - b; });
+          for (i = 0; i < ks.length; i++)
+            if (dom.colDom[ks[i]].length === 0)
+              return { label: colLabel(ks[i]) + "のリス", type: "col", tkey: ks[i] };
+          return null;
         }
-        for (cc = 0; cc < N; cc++){
-          if (cc === c) continue;
-          any = false;
-          for (rr = 0; rr < N; rr++)
-            if (cellState[rr][cc] === 0 && !blocked(rr, cc)){ any = true; break; }
-          if (!any) return "左から" + (cc + 1) + "番目の縦列のリスが置けなくなっちゃう";
+        /* 候補が1つだけになった色・横列・縦列の、その1マス（＝置くしかないマス）。なければ null。
+           横列・縦列の1マスも、そのマスの色のリスがそこに入るしかない点は同じ */
+        function findSingleton(dom){
+          var letters = colorLetters(), i, ks;
+          for (i = 0; i < letters.length; i++){
+            var ch = letters[i];
+            if (ch in dom.colorDom && dom.colorDom[ch].length === 1) return dom.colorDom[ch][0];
+          }
+          ks = Object.keys(dom.rowDom).map(Number).sort(function(a, b){ return a - b; });
+          for (i = 0; i < ks.length; i++) if (dom.rowDom[ks[i]].length === 1) return dom.rowDom[ks[i]][0];
+          ks = Object.keys(dom.colDom).map(Number).sort(function(a, b){ return a - b; });
+          for (i = 0; i < ks.length; i++) if (dom.colDom[ks[i]].length === 1) return dom.colDom[ks[i]][0];
+          return null;
         }
-        return "盤面が完成できなくなっちゃう";
+        // ①直接理由：仮置きだけで候補ゼロになる対象
+        var zero0 = findZero(computeDomains(placedList));
+        if (zero0) return { text: zero0.label + "が置けなくなっちゃう", steps: 0, tier: 0, targetType: zero0.type, targetKey: zero0.tkey };
+        // ②連鎖理由：強制配置を伝播させ、候補ゼロが出るまでの強制配置を全部記録する。
+        // 3ステップ以内で矛盾に届く場合だけ、順序つきで全文を返す。超えたら tier 3（不採用）
+        var curPlaced = placedList.slice();
+        var chain = [];
+        for (var step = 0; step < N * 2; step++){
+          var forced = findSingleton(computeDomains(curPlaced));
+          if (!forced) break;
+          var already = false;
+          curPlaced.forEach(function(p){ if (p[0] === forced[0] && p[1] === forced[1]) already = true; });
+          if (already) break;
+          chain.push(forced);
+          curPlaced = curPlaced.concat([forced]);
+          var zero = findZero(computeDomains(curPlaced));
+          if (zero){
+            if (chain.length > 3) return { text: "", steps: chain.length, tier: 3 };
+            var parts = chain.map(function(f){
+              return colorName(region[f[0]][f[1]]) + "のリスは"
+                + rowLabel(f[0]) + "・" + colLabel(f[1]) + "のマスに決まって";
+            });
+            var body;
+            if (parts.length === 1) body = parts[0];
+            else if (parts.length === 2) body = "まず" + parts[0] + "、次に" + parts[1];
+            else body = "まず" + parts[0] + "、次に" + parts[1] + "、さらに" + parts[2];
+            return { text: body + "、そうすると" + zero.label + "が置けなくなっちゃう", steps: chain.length, tier: 1, targetType: zero.type, targetKey: zero.tkey };
+          }
+          if (chain.length > 3) return { text: "", steps: chain.length, tier: 3 };
+        }
+        // ③最後の手段
+        return { text: "盤面が完成できなくなっちゃう", steps: 0, tier: 2 };
       }
 
-      /* (b) 論理ヒント：ソルバーで「どの完成形にもリスが入らないマス」＝論理で決まる✘を見つける */
-      function hintLogic(){
-        if (!playing || cur < 0) return;
-        hintCount++;
-        addPenalty(10); // 論理ヒント：+10秒
-        // 今の盤面と矛盾しない完成形が1つもない＝手動✘のどこかが間違っている
-        if (completionExists(null) === false){
-          setMsg("今の✘のどこかが間違っているかも。完成できる形が見つからないよ。「✘を全部消す」で見直してみてね", "bad");
-          return;
-        }
-        // 空きマスを1つずつ試し、そこにリスを置く完成形がないマスを集める
-        var r, c, i, ch, list;
-        var infeasible = [], infSet = {};
-        for (r = 0; r < N; r++) for (c = 0; c < N; c++){
-          if (cellState[r][c] !== 0) continue;
-          if (completionExists([r, c]) === false){ infeasible.push([r, c]); infSet[key(r, c)] = true; }
-        }
-        if (!infeasible.length){
-          setMsg("空いているマスは、ぜんぶリスの入る場所として決まっているよ。「リスを確定」で置いてみてね", "good");
-          return;
-        }
-        function pick(listAll){
-          return listAll.filter(function(rc){ return infSet[key(rc[0], rc[1])]; }).slice(0, 3);
-        }
-        var cands = domainsNow();
-        var found = foundColorSet();
-        var letters = colorLetters();
+/* (b) 論理ヒント：ソルバーで「どの完成形にもリスが入らないマス」＝論理で決まる✘を見つけ、
+「論理で解くときの次の1手」を返す。今の盤面から毎回解き直すので、プレイヤーが
+ヒントと違う手を打っても、その盤面に合った次の1手になる（手順の押し付けはしない）。
+理由は難易度の低い順（ティア1→6）に開示する。これがそのまま解く順になる：
+ティア1：候補が1マスだけの色／色が1ラインに閉じている／ラインに1色しかない／直接の背理法
+ティア2：閉じ込め k=2（双対→ユニオン）／ティア3：閉じ込め k=3（双対→ユニオン）
+ティア4：閉じ込め k=4〜5（双対のみ）／ティア5：連鎖背理法（手順全表示・3ステップまで）
+ティア6：汎用文フォールバック
+ティア内では、前回のヒントの✘や置かれたリス（hintFocus）と色・横列・縦列・隣接で
+つながる候補を先に出して推理の流れをつなげ、それ以外は「候補の少ない色 → 横列 → 縦列、
+上・左に近い順」の決定的な自然順にする（同じ盤面では毎回同じヒントになる）。
+どのティアの✘も、対象は pick()（ソルバーで「どの完成形にも入らない」と確認済みのマス）を通す（安全弁） */
+function hintLogic(){
+if (!playing || cur < 0) return;
+hintCount++;
+addPenalty(10); // 論理ヒント：+10秒
+// 今の盤面と矛盾しない完成形が1つもない＝手動✘のどこかが間違っている
+if (completionExists(null) === false){
+setMsg("今の✘のどこかが間違っているかも。完成できる形が見つからないよ。「✘を全部消す」で見直してみてね", "bad");
+return;
+}
+// 空きマスを1つずつ試し、そこにリスを置く完成形がないマスを集める
+var r, c, i, ch, list;
+var infeasible = [], infSet = {};
+for (r = 0; r < N; r++) for (c = 0; c < N; c++){
+if (cellState[r][c]!== 0) continue;
+if (completionExists([r, c]) === false){ infeasible.push([r, c]); infSet[key(r, c)] = true;}
+}
+if (!infeasible.length){
+setMsg("空いているマスは、ぜんぶリスの入る場所として決まっているよ。「リスを確定」で置いてみてね", "good");
+return;
+}
+function pick(listAll){
+return listAll.filter(function(rc){ return infSet[key(rc[0], rc[1])];}).slice(0, 3);
+}
+var cands = domainsNow();
+var found = foundColorSet();
+var letters = colorLetters();
 
-        // 簡単な理由が言えるパターンを優先する
-        // 候補が1マスだけになった色 → その行・列・まわりは✘
-        for (i = 0; i < letters.length; i++){
-          ch = letters[i];
-          if (found[ch] || !cands[ch] || cands[ch].length !== 1) continue;
-          var cell = cands[ch][0];
-          list = [];
-          for (r = 0; r < N; r++) for (c = 0; c < N; c++){
-            if (cellState[r][c] !== 0) continue;
-            if (r === cell[0] && c === cell[1]) continue;
-            if (r === cell[0] || c === cell[1] || (Math.abs(r - cell[0]) <= 1 && Math.abs(c - cell[1]) <= 1)) list.push([r, c]);
-          }
-          list = pick(list);
-          if (list.length){
-            applyHintXs(list, colorName(ch) + "のリスが入れるのは、もうこの1マスだけ。だから同じ横列・縦列と、まわりのマスにはリスは入らないよ");
-            return;
-          }
-        }
+// 背理法の理由はここで1回だけ計算し、ティア1（直接）とティア5・6（連鎖・汎用）で使い回す
+var contra = {};
+infeasible.forEach(function(rc){ contra[key(rc[0], rc[1])] = contradictionInfo(rc[0], rc[1]);});
 
-        // ある色の候補が全部同じ行（または列）にしか残っていない → その行（列）の他の色のマスは✘
-        for (i = 0; i < letters.length; i++){
-          ch = letters[i];
-          if (found[ch] || !cands[ch] || cands[ch].length < 2) continue;
-          var rows = {}, cols = {};
-          cands[ch].forEach(function(rc){ rows[rc[0]] = true; cols[rc[1]] = true; });
-          if (Object.keys(rows).length === 1){
-            var rr = cands[ch][0][0];
-            list = [];
-            for (c = 0; c < N; c++) if (cellState[rr][c] === 0 && region[rr][c] !== ch) list.push([rr, c]);
-            list = pick(list);
-            if (list.length){
-              applyHintXs(list, colorName(ch) + "のリスが入れるのは、上から" + (rr + 1) + "番目の横列だけだから、その横列のほかの色のマスにはリスは入らないよ");
-              return;
-            }
-          }
-          if (Object.keys(cols).length === 1){
-            var cc = cands[ch][0][1];
-            list = [];
-            for (r = 0; r < N; r++) if (cellState[r][cc] === 0 && region[r][cc] !== ch) list.push([r, cc]);
-            list = pick(list);
-            if (list.length){
-              applyHintXs(list, colorName(ch) + "のリスが入れるのは、左から" + (cc + 1) + "番目の縦列だけだから、その縦列のほかの色のマスにはリスは入らないよ");
-              return;
-            }
-          }
-        }
+// ===== ティア内の並び替え（解く順） =====
+// 候補オブジェクト：{ list, reason, colors, rows, cols, cells, nat}
+// colors/rows/cols/cells … 前回の変化（hintFocus）とつながるかの判定材料
+// nat … 自然順のキー（小さい順に優先）。カテゴリは 色=0 → 横列=1 → 縦列=2
+function candCount(ch2){ return cands[ch2]? cands[ch2].length: 999;}
+function focusRelated(cd){
+if (!hintFocus) return false;
+var i2, j2;
+for (i2 = 0; i2 < cd.colors.length; i2++) if (hintFocus.colors[cd.colors[i2]]) return true;
+for (i2 = 0; i2 < cd.rows.length; i2++) if (hintFocus.rows[cd.rows[i2]]) return true;
+for (i2 = 0; i2 < cd.cols.length; i2++) if (hintFocus.cols[cd.cols[i2]]) return true;
+for (i2 = 0; i2 < cd.cells.length; i2++) for (j2 = 0; j2 < hintFocus.cells.length; j2++)
+if (Math.abs(cd.cells[i2][0] - hintFocus.cells[j2][0]) <= 1
+&& Math.abs(cd.cells[i2][1] - hintFocus.cells[j2][1]) <= 1) return true;
+return false;
+}
+function cmpNat(a, b){
+for (var i2 = 0; i2 < Math.max(a.length, b.length); i2++){
+var d = (a[i2] || 0) - (b[i2] || 0);
+if (d) return d;
+}
+return 0;
+}
+// つながる候補を先に、次に自然順で、最も解く順に合う候補を1つ選ぶ（決定的）
+function pickCand(candArr){
+var bestC = null;
+candArr.forEach(function(cd){
+cd.rel = focusRelated(cd)? 0: 1;
+if (!bestC || cd.rel < bestC.rel
+|| (cd.rel === bestC.rel && cmpNat(cd.nat, bestC.nat) < 0)) bestC = cd;
+});
+return bestC;
+}
+// 背理法の対象（色／横列／縦列）から、つながり判定用の色・行・列と自然順キーを作る
+function targetInfo(info, firstCell){
+var cat = info.targetType === "color"? 0: (info.targetType === "row"? 1: 2);
+var tNat = info.targetType === "color"? candCount(info.targetKey): info.targetKey;
+return {
+colors: info.targetType === "color"? [info.targetKey]: [],
+rows: info.targetType === "row"? [info.targetKey]: [],
+cols: info.targetType === "col"? [info.targetKey]: [],
+natHead: [cat, tNat, firstCell[0], firstCell[1]]
+};
+}
 
-        // ある行（または列）の候補が1色しか残っていない → その色は他の行（列）には入らない
-        for (r = 0; r < N; r++){
-          var inRow = {};
-          for (c = 0; c < N; c++) if (cellState[r][c] === 0) inRow[region[r][c]] = true;
-          var ksR = Object.keys(inRow);
-          if (ksR.length === 1){
-            ch = ksR[0];
-            list = pick((cands[ch] || []).filter(function(rc){ return rc[0] !== r; }));
-            if (list.length){
-              applyHintXs(list, "上から" + (r + 1) + "番目の横列のリスは " + colorName(ch) + " だけ。だから " + colorName(ch) + " はほかの横列には入らないよ");
-              return;
-            }
-          }
-        }
-        for (c = 0; c < N; c++){
-          var inCol = {};
-          for (r = 0; r < N; r++) if (cellState[r][c] === 0) inCol[region[r][c]] = true;
-          var ksC = Object.keys(inCol);
-          if (ksC.length === 1){
-            ch = ksC[0];
-            list = pick((cands[ch] || []).filter(function(rc){ return rc[1] !== c; }));
-            if (list.length){
-              applyHintXs(list, "左から" + (c + 1) + "番目の縦列のリスは " + colorName(ch) + " だけ。だから " + colorName(ch) + " はほかの縦列には入らないよ");
-              return;
-            }
-          }
-        }
+// ===== ティア1a：候補が1マスだけになった色 → その行・列・まわりは✘ =====
+{
+var sngCands = [];
+for (i = 0; i < letters.length; i++){
+ch = letters[i];
+if (found[ch] ||!cands[ch] || cands[ch].length!== 1) continue;
+var cell1 = cands[ch][0];
+var raw1 = [];
+for (r = 0; r < N; r++) for (c = 0; c < N; c++){
+if (cellState[r][c]!== 0) continue;
+if (r === cell1[0] && c === cell1[1]) continue;
+if (r === cell1[0] || c === cell1[1] || (Math.abs(r - cell1[0]) <= 1 && Math.abs(c - cell1[1]) <= 1)) raw1.push([r, c]);
+}
+list = pick(raw1);
+if (!list.length) continue;
+sngCands.push({
+list: list,
+reason: colorName(ch) + "のリスが入れるのは、もうこの1マスだけ。だから同じ横列・縦列と、まわりのマスにはリスは入らないよ",
+colors: [ch], rows: [cell1[0]], cols: [cell1[1]],
+cells: list.concat([cell1]),
+nat: [cell1[0], cell1[1]]
+});
+}
+if (sngCands.length){
+var sngBest = pickCand(sngCands);
+applyHintXs(sngBest.list, sngBest.reason);
+return;
+}
+}
 
-        // 背理法：同じ理由でくくれるマスを最大3つ付ける
-        var groups = {}, order = [];
-        infeasible.forEach(function(rc){
-          var t = contradictionText(rc[0], rc[1]);
-          if (!groups[t]){ groups[t] = []; order.push(t); }
-          groups[t].push(rc);
-        });
-        var best = order[0];
-        order.forEach(function(t){ if (groups[t].length > groups[best].length) best = t; });
-        applyHintXs(groups[best].slice(0, 3), "光っているマスに置くと、" + best + "から✘だよ");
-      }
+// ===== ティア1bある色の候補が全部1つの横列（または縦列）の中にだけある =====
+// → そのラインのリスはその色に決まるので、ライン内の他色のマスは✘。
+// 自然順は「候補の少ない色」から
+{
+var r1Cands = [];
+for (i = 0; i < letters.length; i++){
+ch = letters[i];
+if (found[ch] ||!cands[ch] || cands[ch].length < 2) continue;
+var rows1 = {}, cols1 = {};
+cands[ch].forEach(function(rc){ rows1[rc[0]] = true; cols1[rc[1]] = true;});
+var first1 = cands[ch][0];
+if (Object.keys(rows1).length === 1){
+var rr1 = first1[0];
+var rawR = [];
+for (c = 0; c < N; c++) if (cellState[rr1][c] === 0 && region[rr1][c]!== ch) rawR.push([rr1, c]);
+list = pick(rawR);
+if (list.length){
+r1Cands.push({
+list: list,
+reason: colorName(ch) + "のリスは" + rowLabel(rr1) + "にしか入れないから、その" + rowLabel(rr1) + "の他のマスは✘だよ",
+colors: [ch], rows: [rr1], cols: [],
+cells: list,
+nat: [candCount(ch), first1[0], first1[1], 0]
+});
+}
+}
+if (Object.keys(cols1).length === 1){
+var cc1 = first1[1];
+var rawC = [];
+for (r = 0; r < N; r++) if (cellState[r][cc1] === 0 && region[r][cc1]!== ch) rawC.push([r, cc1]);
+list = pick(rawC);
+if (list.length){
+r1Cands.push({
+list: list,
+reason: colorName(ch) + "のリスは" + colLabel(cc1) + "にしか入れないから、その" + colLabel(cc1) + "の他のマスは✘だよ",
+colors: [ch], rows: [], cols: [cc1],
+cells: list,
+nat: [candCount(ch), first1[0], first1[1], 1]
+});
+}
+}
+}
+if (r1Cands.length){
+var r1Best = pickCand(r1Cands);
+applyHintXs(r1Best.list, r1Best.reason);
+return;
+}
+}
+
+// ===== ティア1c：ある行（または列）の候補が1色しか残っていない =====
+// → その色のリスはそのラインの中に決まるので、他のラインにあるその色のマスは✘。
+// 自然順は横列（上から）→ 縦列（左から）
+{
+var lsCands = [];
+for (r = 0; r < N; r++){
+var inRow = {};
+for (c = 0; c < N; c++) if (cellState[r][c] === 0) inRow[region[r][c]] = true;
+var ksR = Object.keys(inRow);
+if (ksR.length === 1){
+ch = ksR[0];
+list = pick((cands[ch] || []).filter(function(rc){ return rc[0]!== r;}));
+if (list.length){
+lsCands.push({
+list: list,
+reason: rowLabel(r) + "に入るのは" + colorName(ch) + "のリスだけだから、他の横列の" + colorName(ch) + "のマスは✘だよ",
+colors: [ch], rows: [r], cols: [],
+cells: list,
+nat: [1, r, list[0][0], list[0][1]]
+});
+}
+}
+}
+for (c = 0; c < N; c++){
+var inCol = {};
+for (r = 0; r < N; r++) if (cellState[r][c] === 0) inCol[region[r][c]] = true;
+var ksC = Object.keys(inCol);
+if (ksC.length === 1){
+ch = ksC[0];
+list = pick((cands[ch] || []).filter(function(rc){ return rc[1]!== c;}));
+if (list.length){
+lsCands.push({
+list: list,
+reason: colLabel(c) + "に入るのは" + colorName(ch) + "のリスだけだから、他の縦列の" + colorName(ch) + "のマスは✘だよ",
+colors: [ch], rows: [], cols: [c],
+cells: list,
+nat: [2, c, list[0][0], list[0][1]]
+});
+}
+}
+}
+if (lsCands.length){
+var lsBest = pickCand(lsCands);
+applyHintXs(lsBest.list, lsBest.reason);
+return;
+}
+}
+
+// ===== ティア1d：直接の背理法 =====
+// 仮置きの直接消去（同じ横列・縦列・同色・周囲8マス）だけで、ある色／横列／縦列の候補がゼロになるマス。
+// 文面は「ここに置くと、{対象}のリスが置けなくなっちゃうから✘だよ」。連鎖は含まない（ティア5）。
+// 同じ理由でくくれるマスは最大3つまで付ける
+{
+var dGroups = {}, dOrder = [];
+infeasible.forEach(function(rc){
+var info = contra[key(rc[0], rc[1])];
+if (info.tier!== 0) return;
+if (!dGroups[info.text]){ dGroups[info.text] = { cells: [], info: info}; dOrder.push(info.text);}
+dGroups[info.text].cells.push(rc);
+});
+if (dOrder.length){
+var dCands = dOrder.map(function(t){
+var g = dGroups[t];
+var ti = targetInfo(g.info, g.cells[0]);
+return {
+list: g.cells.slice(0, 3),
+reason: "ここに置くと、" + t + "から✘だよ",
+colors: ti.colors, rows: ti.rows, cols: ti.cols,
+cells: g.cells,
+nat: ti.natHead
+};
+});
+var dBest = pickCand(dCands);
+applyHintXs(dBest.list, dBest.reason);
+return;
+}
+}
+
+// ===== 閉じ込め（ティア2〜4で使う探索） =====
+// k色の候補が、すべてk本の横列（または縦列）の中にだけある
+// → そのk本のラインのリスはそのk色で決まるので、ライン内にある他の色の候補マスは✘。
+// 色ごとに「その色はこのライン群の中にしかない」と1色ずつ盤面から確かめられる。
+// ✘は最大3つ、対象ラインのうち端に近いラインのマスを優先する（候補内のマスの選び方は従来どおり）。
+// 候補を全部集めてから、ティア内の並び替え（つながり→自然順）で1つ選ぶ。適用したら true
+function findDual(k){
+var dualCombosOf = function(arr, kk){
+var out = [];
+(function rec(start, curArr){
+if (curArr.length === kk){ out.push(curArr.slice()); return;}
+for (var s = start; s < arr.length; s++){ curArr.push(arr[s]); rec(s + 1, curArr); curArr.pop();}
+})(0, []);
+return out;
+};
+var dualSetName = function(axis, idxs){
+var kk = idxs.length, first = idxs[0], last = idxs[idxs.length - 1];
+var contiguous = (last - first === kk - 1);
+if (!contiguous)
+return idxs.map(function(x){ return axis === 0? rowLabel(x): colLabel(x);}).join("と");
+if (axis === 0){
+if (first === 0) return "上の" + kk + "つの横列";
+if (last === N - 1) return "下の" + kk + "つの横列";
+// 中央の連続範囲は、近い方の端から「○番目から○番目」で表す（ユニオンと共通）
+if (first + 1 <= N - last) return "上から" + (first + 1) + "番目から" + (last + 1) + "番目の横列";
+return "下から" + (N - last) + "番目から" + (N - first) + "番目の横列";
+}
+if (first === 0) return "左の" + kk + "つの縦列";
+if (last === N - 1) return "右の" + kk + "つの縦列";
+if (first + 1 <= N - last) return "左から" + (first + 1) + "番目から" + (last + 1) + "番目の縦列";
+return "右から" + (N - last) + "番目から" + (N - first) + "番目の縦列";
+};
+// 2回目の言及は短くする：端寄りの集合名は「その2つの横列」、範囲名は「その縦列たち」等
+var dualShortName = function(axis, idxs){
+var full = dualSetName(axis, idxs);
+var m = /^(?:上|下|左|右)の(\d+つの(?:横列|縦列))$/.exec(full);
+if (m) return m[1];
+return axis === 0? "横列たち": "縦列たち";
+};
+// 候補が残っている未確定の色だけを集合の材料にする
+var availColors = letters.filter(function(ch2){
+return!found[ch2] && cands[ch2] && cands[ch2].length;
+});
+var dualCands = [];
+for (var axis3 = 0; axis3 <= 1; axis3++){
+var cCombos = dualCombosOf(availColors, k);
+for (var ci3 = 0; ci3 < cCombos.length; ci3++){
+var cset = cCombos[ci3], inColors = {}, lineSet = {};
+cset.forEach(function(ch3){
+inColors[ch3] = true;
+cands[ch3].forEach(function(rc){ lineSet[axis3 === 0? rc[0]: rc[1]] = true;});
+});
+var lineIdxs = Object.keys(lineSet).map(Number).sort(function(a, b){ return a - b;});
+if (lineIdxs.length!== k) continue;
+var inLines = {};
+lineIdxs.forEach(function(ix){ inLines[ix] = true;});
+var targets3 = [];
+for (r = 0; r < N; r++) for (c = 0; c < N; c++){
+if (cellState[r][c]!== 0 || inColors[region[r][c]]) continue;
+var li3 = axis3 === 0? r: c;
+if (!inLines[li3]) continue;
+targets3.push({ rc: [r, c], line: li3, edge: Math.min(li3, N - 1 - li3), other: axis3 === 0? c: r});
+}
+if (!targets3.length) continue;
+// 端のラインのマスから優先して最大3つ（プレイヤーが確認しやすい順）
+targets3.sort(function(a, b){
+return (a.edge - b.edge) || (a.line - b.line) || (a.other - b.other);
+});
+list = pick(targets3.map(function(x){ return x.rc;}));
+if (!list.length) continue;
+var cNames = cset.map(function(ch3){ return colorName(ch3);}).join("と");
+var sName = dualSetName(axis3, lineIdxs);
+var sumCnt = 0;
+cset.forEach(function(ch3){ sumCnt += candCount(ch3);});
+dualCands.push({
+list: list,
+reason: cNames + "は" + sName + "の中に完全に収まっているから、その"
++ dualShortName(axis3, lineIdxs) + "のリスはこの" + k + "色で決まり。だから他の色のマスは✘だよ",
+colors: cset.slice(),
+rows: axis3 === 0? lineIdxs.slice(): [],
+cols: axis3 === 1? lineIdxs.slice(): [],
+cells: list,
+nat: [sumCnt, list[0][0], list[0][1]]
+});
+}
+}
+if (!dualCands.length) return false;
+var dualBest = pickCand(dualCands);
+applyHintXs(dualBest.list, dualBest.reason);
+return true;
+}
+
+// k本の横列（または縦列）の候補マスの色がちょうどk色だけ
+// → そのk色のリスは全部そのラインたちの中で決まる。消せるマスは2方向ある：
+// (a) そのk色の、ライン群の外にあるマス
+// (b) ライン群の中にある、k色以外の色のマス
+// ✘は最大3つまで。(a) は対象集合に近いラインのマスを優先する（候補内のマスの選び方は従来どおり）。
+// 候補を全部集めてから、ティア内の並び替え（つながり→自然順）で1つ選ぶ。適用したら true
+function findUnion(k){
+// axis: 0=横列の集合 / 1=縦列の集合
+var lineColorsOf = function(axis, idx){
+var set = {}, hasSquirrel = false, cnt = 0, a;
+for (a = 0; a < N; a++){
+var rr2 = axis === 0? idx: a, cc2 = axis === 0? a: idx;
+if (cellState[rr2][cc2] === 3) hasSquirrel = true;
+if (cellState[rr2][cc2] === 0){ set[region[rr2][cc2]] = true; cnt++;}
+}
+return { set: set, hasSquirrel: hasSquirrel, cnt: cnt};
+};
+var lineSetName = function(axis, idxs){
+var kk = idxs.length, first = idxs[0], last = idxs[idxs.length - 1];
+var contiguous = (last - first === kk - 1);
+if (!contiguous)
+return idxs.map(function(x){ return axis === 0? rowLabel(x): colLabel(x);}).join("と");
+if (axis === 0){
+if (first === 0) return "上の" + kk + "つの横列";
+if (last === N - 1) return "下の" + kk + "つの横列";
+// 中央の連続範囲は、近い方の端から「○番目から○番目」で表す
+if (first + 1 <= N - last) return "上から" + (first + 1) + "番目から" + (last + 1) + "番目の横列";
+return "下から" + (N - last) + "番目から" + (N - first) + "番目の横列";
+}
+if (first === 0) return "左の" + kk + "つの縦列";
+if (last === N - 1) return "右の" + kk + "つの縦列";
+if (first + 1 <= N - last) return "左から" + (first + 1) + "番目から" + (last + 1) + "番目の縦列";
+return "右から" + (N - last) + "番目から" + (N - first) + "番目の縦列";
+};
+var combosOf = function(arr, kk){
+var out = [];
+(function rec(start, cur){
+if (cur.length === kk){ out.push(cur.slice()); return;}
+for (var s = start; s < arr.length; s++){ cur.push(arr[s]); rec(s + 1, cur); cur.pop();}
+})(0, []);
+return out;
+};
+var unionCands = [];
+for (var axis2 = 0; axis2 <= 1; axis2++){
+// リスが置かれていない＆候補が残っているラインだけを集合の材料にする
+var usable = [];
+for (var li = 0; li < N; li++){
+var info0 = lineColorsOf(axis2, li);
+if (!info0.hasSquirrel && info0.cnt > 0) usable.push(li);
+}
+var combos = combosOf(usable, k);
+var ci2, idxs, union, inSet, targets;
+// (a) そのk色の、ライン群の外にあるマス
+for (ci2 = 0; ci2 < combos.length; ci2++){
+idxs = combos[ci2]; union = {};
+idxs.forEach(function(ix){
+var s = lineColorsOf(axis2, ix).set;
+Object.keys(s).forEach(function(ch2){ union[ch2] = true;});
+});
+var unionLetters = Object.keys(union).sort();
+if (unionLetters.length!== k) continue;
+inSet = {};
+idxs.forEach(function(ix){ inSet[ix] = true;});
+targets = [];
+for (r = 0; r < N; r++) for (c = 0; c < N; c++){
+if (cellState[r][c]!== 0 ||!union[region[r][c]]) continue;
+if (inSet[axis2 === 0? r: c]) continue;
+var dist = Math.min.apply(null, idxs.map(function(ix){
+return Math.abs((axis2 === 0? r: c) - ix);
+}));
+targets.push({ rc: [r, c], d: dist});
+}
+targets.sort(function(a, b){
+return (a.d - b.d) || (a.rc[0] - b.rc[0]) || (a.rc[1] - b.rc[1]);
+});
+list = pick(targets.map(function(x){ return x.rc;}));
+if (!list.length) continue;
+var colorNames = unionLetters.map(function(ch2){ return colorName(ch2);}).join("と");
+var setName = lineSetName(axis2, idxs);
+var otherWord = axis2 === 0? "他の横列": "他の縦列";
+var sumCntA = 0;
+unionLetters.forEach(function(ch2){ sumCntA += candCount(ch2);});
+unionCands.push({
+list: list,
+reason: setName + "に入るのは" + colorNames + "のリスだけだから、"
++ otherWord + "の" + colorNames + "のマスは✘だよ",
+colors: unionLetters.slice(),
+rows: axis2 === 0? idxs.slice(): [],
+cols: axis2 === 1? idxs.slice(): [],
+cells: list,
+nat: [sumCntA, 0, list[0][0], list[0][1]]
+});
+}
+// (b) ライン群の中にある、k色以外の色のマス
+for (var ciB = 0; ciB < combos.length; ciB++){
+var idxsB = combos[ciB], unionB = {};
+idxsB.forEach(function(ix){
+var sB = lineColorsOf(axis2, ix).set;
+Object.keys(sB).forEach(function(chB){ unionB[chB] = true;});
+});
+var unionLettersB = Object.keys(unionB).sort();
+if (unionLettersB.length!== k) continue;
+var inSetB = {};
+idxsB.forEach(function(ix){ inSetB[ix] = true;});
+var targetsB = [];
+for (r = 0; r < N; r++) for (c = 0; c < N; c++){
+if (cellState[r][c]!== 0 || unionB[region[r][c]]) continue;
+if (!inSetB[axis2 === 0? r: c]) continue;
+targetsB.push([r, c]);
+}
+if (!targetsB.length) continue;
+targetsB.sort(function(a, b){
+var la = axis2 === 0? a[0]: a[1], lb = axis2 === 0? b[0]: b[1];
+var oa = axis2 === 0? a[1]: a[0], ob = axis2 === 0? b[1]: b[0];
+return (la - lb) || (oa - ob);
+});
+list = pick(targetsB);
+if (!list.length) continue;
+var colorNamesB = unionLettersB.map(function(chB){ return colorName(chB);}).join("と");
+var setNameB = lineSetName(axis2, idxsB);
+var linesWordB = axis2 === 0? "横列たち": "縦列たち";
+var sumCntB = 0;
+unionLettersB.forEach(function(chB){ sumCntB += candCount(chB);});
+unionCands.push({
+list: list,
+reason: setNameB + "に入るのは" + colorNamesB + "のリスだけだから、その"
++ linesWordB + "にある他の色のマスは✘だよ",
+colors: unionLettersB.slice(),
+rows: axis2 === 0? idxsB.slice(): [],
+cols: axis2 === 1? idxsB.slice(): [],
+cells: list,
+nat: [sumCntB, 1, list[0][0], list[0][1]]
+});
+}
+}
+if (!unionCands.length) return false;
+var unionBest = pickCand(unionCands);
+applyHintXs(unionBest.list, unionBest.reason);
+return true;
+}
+
+// ===== ティア2：閉じ込め k=2（双対→ユニオン） =====
+if (findDual(2)) return;
+if (findUnion(2)) return;
+// ===== ティア3：閉じ込め k=3（双対→ユニオン） =====
+if (findDual(3)) return;
+if (findUnion(3)) return;
+// ===== ティア4：閉じ込め k=4〜5（双対のみ） =====
+// k=4〜5のユニオンは「だけ」と言い切る根拠を盤面から追いにくく文も長くなるため使わない。
+// 大きな集合の閉じ込めは、1色ずつ確かめられる双対を先に使う。
+if (findDual(4)) return;
+if (findDual(5)) return;
+
+// ===== ティア5：連鎖背理法（手順を全部見せる・3ステップまで・ステップ数の少ない順） =====
+// 矛盾まで4ステップ以上かかる✘（contradictionInfo の tier 3）は、途中が見えず追えないので採用しない。
+// 同じ理由でくくれるマスは最大3つまで付ける
+var groups = {}, order = [], longCells = [], genericCells = [];
+infeasible.forEach(function(rc){
+var info = contra[key(rc[0], rc[1])];
+if (info.tier === 3){ longCells.push(rc); return;}
+if (info.tier === 2){ genericCells.push(rc); return;}
+if (info.tier!== 1) return; // tier 0（直接）はティア1で処理済み
+var t = info.text;
+if (!groups[t]){ groups[t] = { cells: [], info: info}; order.push(t);}
+groups[t].cells.push(rc);
+});
+if (order.length){
+var chainCands = order.map(function(t){
+var g = groups[t];
+var ti = targetInfo(g.info, g.cells[0]);
+return {
+list: g.cells.slice(0, 3),
+reason: "ここに置くと、" + t + "から✘だよ",
+colors: ti.colors, rows: ti.rows, cols: ti.cols,
+cells: g.cells,
+nat: [g.info.steps].concat(ti.natHead)
+};
+});
+var chainBest = pickCand(chainCands);
+applyHintXs(chainBest.list, chainBest.reason);
+return;
+}
+
+// ===== ティア6：汎用文フォールバック =====
+// 具体的な理由が言えるマスが1つもない場合の最後の手段。長い連鎖のマスしか残っていないときもここで出す
+applyHintXs((genericCells.length? genericCells: (longCells.length? longCells: infeasible)).slice(0, 3),
+"ここに置くと、盤面が完成できなくなっちゃうから✘だよ");
+}
+
 
       /* (c) ランダム✘：正解でない空きマスから最大3マスに✘を付ける */
       function hintRandom(){
