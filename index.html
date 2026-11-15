@@ -297,10 +297,25 @@
       .btn:active { transform: translateY(1px); }
 
       .msg {
-        height: 5rem; min-height: 5rem; max-height: 5rem; flex: none; overflow: hidden; display: flex; align-items: center;
+        /* 高さは固定のまま（文が長くても盤面は動かない）。欄の内側だけを縦スクロールさせる */
+        height: 5rem; min-height: 5rem; max-height: 5rem; flex: none;
+        overflow-y: auto; overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
+        /* この欄だけ縦パンを許可する。盤面セルや画面全体のスクロール・ズーム抑止は変えない */
+        touch-action: pan-y;
+        overscroll-behavior: contain;
+        display: flex; flex-direction: column;
         border-radius: 10px; padding: 6px 12px; font-size: .9rem; font-weight: 700;
         background: var(--surface-2); color: var(--ink-soft); margin-bottom: 8px; line-height: 1.5;
+        /* 下に続きがあることが分かるよう、下端にうっすら影（フェード）を入れる */
+        box-shadow: inset 0 -14px 12px -12px rgba(70, 58, 20, .35);
+        scrollbar-width: thin;
       }
+      .msg::-webkit-scrollbar { width: 5px; }
+      .msg::-webkit-scrollbar-thumb { background: rgba(93, 86, 67, .45); border-radius: 999px; }
+      .msg::-webkit-scrollbar-track { background: transparent; }
+      /* 短い文は今までどおり縦中央、長い文は auto マージンが 0 になって先頭からスクロールできる */
+      .msg-text { display: block; width: 100%; margin-top: auto; margin-bottom: auto; }
       .msg.bad { background: var(--danger-soft); color: var(--danger); }
       .msg.good { background: var(--accent-soft); color: var(--accent); }
       @media (prefers-color-scheme: dark) { .msg.good { color: var(--ink); } }
@@ -660,7 +675,7 @@
           </div>
         </div>
 
-        <div class="msg" id="g-msg" role="status">ダブルタップでリスを置いてみよう</div>
+        <div class="msg" id="g-msg" role="status"><span class="msg-text" id="g-msg-text">ダブルタップでリスを置いてみよう</span></div>
 
         <div class="colorbar">
           <div class="colorbar-head"><span>色の進捗</span><span class="grow"></span><span id="g-left"></span></div>
@@ -1397,8 +1412,11 @@
 
       function setMsg(text, kind){
         var m = $("g-msg");
-        m.textContent = text;
+        var t = $("g-msg-text");
+        if (t) t.textContent = text; else m.textContent = text;
         m.className = "msg" + (kind ? " " + kind : "");
+        /* 新しいメッセージは必ず先頭から読めるよう、欄のスクロールを先頭に戻す */
+        m.scrollTop = 0;
       }
 
       /* ================= タイマー ================= */
@@ -1690,8 +1708,14 @@
       /* (r,c) にリスを仮置きしたとき、盤面が完成できなくなる具体的な理由を探す（背理法の理由文用）。
          戻り値は { text, steps, tier, targetType, targetKey }。text は理由の続き（呼び出し側で「ここに置くと、〜から✘だよ」とつなぐ）。
          targetType/targetKey は候補ゼロになった対象（色／横列／縦列）で、ヒントのティア内並び替えに使う。
-         ①直接理由（tier 0, steps 0）：仮置きの消去（同じ横列・縦列・同色・周囲8マス）だけで候補がゼロになる対象を、
-           そのマスと関係する対象に限らず、全ての色・全ての横列・全ての縦列から探す。
+         ①直接理由（tier 0, steps 0）：仮置きの直接消去だけで、現在の盤面での候補がゼロになる対象を、
+           そのマスと関係する対象に限らず、全ての色・全ての横列・全ての縦列から探す（findDirectZero）。
+           判定は伝播なしの直接消去のみで計算し、ソルバーの伝播結果は使わない。
+           色を名指しする場合は直接消去（同じ横列・縦列・同色・周囲8マス）で候補が全部消えること。
+           横列・縦列を名指しする場合はさらに厳しく、そのラインの候補が仮置きマスの位置による消去
+           （同じ横列・縦列・周囲8マス）だけで、色ごとに分けて全ての色でゼロになること。
+           同色消去（仮置きと同じ色のマスが「その色はもう決まった」で消えること）は色についての
+           主張であってラインについての主張ではないので、ラインの理由には数えない。
            すでにリスがいる色・横列・縦列は「置く必要がない」ので対象から外す。
          ②連鎖理由（tier 1, steps 1〜3）：直接で見つからない場合、候補が1つだけになった色・横列・縦列は
            「そこに置くしかない」として強制配置し、その消去を繰り返し伝播させる。
@@ -1777,8 +1801,80 @@
           for (i = 0; i < ks.length; i++) if (dom.colDom[ks[i]].length === 1) return dom.colDom[ks[i]][0];
           return null;
         }
-        // ①直接理由：仮置きだけで候補ゼロになる対象
-        var zero0 = findZero(computeDomains(placedList));
+        /* 直接理由専用の厳密な候補ゼロ判定（伝播は一切使わない）。
+           候補は「現在の盤面」でまだ空いているマス（cellState===0）だけから数える。
+           すでに置かれたリスの自動✘（状態2）は現在の盤面の一部として候補から外れるが、
+           仮置きから先の強制配置の伝播は一切たどらない。
+           ・色を名指しする場合：仮置きの直接消去（同じ横列・縦列・同色・周囲8マス）で
+             その色の候補が全部消えるときだけ。
+           ・横列・縦列を名指しする場合：そのラインの候補が、仮置きマスの位置による消去
+             （同じ横列・縦列・周囲8マス）だけで全部消えるときだけ。同色消去は
+             「その色のリスは仮置きマスで決まる」という色についての主張なので、
+             ラインの理由には数えない（例：一番左の縦列で、緑の候補は同色でしか消えず
+             水色の候補は隣接で消えるような混ざり方は、ラインが直接ブロックされたとは
+             言わない＝水色と決めつけたような出し方をしない）。さらに候補を色ごとに
+             分けて、全ての色でゼロになることも確かめる（別の色の候補が1つでも残る
+             ラインは「置けなくなる」と言わない） */
+        function findDirectZero(){
+          var assignedColor = {}, rowHas = {}, colHas = {};
+          basePlaced.forEach(function(p){
+            assignedColor[region[p[0]][p[1]]] = true; rowHas[p[0]] = true; colHas[p[1]] = true;
+          });
+          var hCh = region[r][c];
+          // 位置による直接消去（同じ横列・縦列・周囲8マス）
+          function killPos(rr, cc){
+            return rr === r || cc === c || (Math.abs(rr - r) <= 1 && Math.abs(cc - c) <= 1);
+          }
+          // 色を名指しする場合の直接消去（同色も含む）
+          function killColor(rr, cc){
+            return killPos(rr, cc) || region[rr][cc] === hCh;
+          }
+          // ラインの候補が、位置による消去だけで色ごとに全て消えるか
+          function lineAllKilled(arr){
+            var byColor = {}, k, g, j;
+            arr.forEach(function(cell){
+              var ch3 = region[cell[0]][cell[1]];
+              (byColor[ch3] = byColor[ch3] || []).push(cell);
+            });
+            for (k in byColor){
+              g = byColor[k];
+              for (j = 0; j < g.length; j++) if (!killPos(g[j][0], g[j][1])) return false;
+            }
+            return true;
+          }
+          var letters = colorLetters(), i, rr, cc, arr, ok, j2;
+          // 色（候補が空でないものだけ：現在の盤面ですでにゼロの対象は「置けなくなる」と言わない）
+          for (i = 0; i < letters.length; i++){
+            var ch = letters[i];
+            if (assignedColor[ch] || ch === hCh) continue;
+            arr = [];
+            for (rr = 0; rr < N; rr++) for (cc = 0; cc < N; cc++)
+              if (region[rr][cc] === ch && cellState[rr][cc] === 0) arr.push([rr, cc]);
+            if (!arr.length) continue;
+            ok = true;
+            for (j2 = 0; j2 < arr.length; j2++) if (!killColor(arr[j2][0], arr[j2][1])){ ok = false; break; }
+            if (ok) return { label: colorName(ch) + "のリス", type: "color", tkey: ch };
+          }
+          // 横列（仮置きのある横列は、そこにリスが置かれるので対象外）
+          for (rr = 0; rr < N; rr++){
+            if (rowHas[rr] || rr === r) continue;
+            arr = [];
+            for (cc = 0; cc < N; cc++) if (cellState[rr][cc] === 0) arr.push([rr, cc]);
+            if (!arr.length) continue;
+            if (lineAllKilled(arr)) return { label: rowLabel(rr) + "のリス", type: "row", tkey: rr };
+          }
+          // 縦列（仮置きのある縦列は、そこにリスが置かれるので対象外）
+          for (cc = 0; cc < N; cc++){
+            if (colHas[cc] || cc === c) continue;
+            arr = [];
+            for (rr = 0; rr < N; rr++) if (cellState[rr][cc] === 0) arr.push([rr, cc]);
+            if (!arr.length) continue;
+            if (lineAllKilled(arr)) return { label: colLabel(cc) + "のリス", type: "col", tkey: cc };
+          }
+          return null;
+        }
+        // ①直接理由：厳密な直接消去だけで候補ゼロになる対象
+        var zero0 = findDirectZero();
         if (zero0) return { text: zero0.label + "が置けなくなっちゃう", steps: 0, tier: 0, targetType: zero0.type, targetKey: zero0.tkey };
         // ②連鎖理由：強制配置を伝播させ、候補ゼロが出るまでの強制配置を全部記録する。
         // 3ステップ以内で矛盾に届く場合だけ、順序つきで全文を返す。超えたら tier 3（不採用）
@@ -2027,7 +2123,9 @@ return;
 }
 
 // ===== ティア1d：直接の背理法 =====
-// 仮置きの直接消去（同じ横列・縦列・同色・周囲8マス）だけで、ある色／横列／縦列の候補がゼロになるマス。
+// 仮置きの直接消去だけで、ある色／横列／縦列の候補がゼロになるマス（contradictionInfo の tier 0）。
+// 色は直接消去（同色含む）で、ラインは位置による消去（同じ横列・縦列・周囲8マス）だけで
+// 色ごとに全て消える場合に限る。同色消去だけに頼るライン主張は直接形で出さない。
 // 文面は「ここに置くと、{対象}のリスが置けなくなっちゃうから✘だよ」。連鎖は含まない（ティア5）。
 // 同じ理由でくくれるマスは最大3つまで付ける
 {
