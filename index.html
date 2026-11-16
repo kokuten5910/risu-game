@@ -50,6 +50,9 @@
         --gold-line: #dfa008;
         --gold-ink: #5c3d00;
         --gold-glow: rgba(223,160,8,.35);
+        --diff2: #1f6fc5;
+        --diff3: #b45309;
+        --diff4: #c0392b;
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -76,11 +79,16 @@
           --gold-line: #d9a400;
           --gold-ink: #ffe9a8;
           --gold-glow: rgba(217,164,0,.3);
+          --diff2: #7db3e8;
+          --diff3: #f0b35e;
+          --diff4: #ff8a7a;
         }
       }
       html {
         -webkit-text-size-adjust: 100%; overscroll-behavior: none;
-        touch-action: none;
+        /* スクロール抑止（touch-action: none）は盤面の中だけ。ページ側は縦パンを許可し、
+           ピンチ／ダブルタップのズーム抑止は JS 側（多指 touchmove・gesture・touchend）で担う */
+        touch-action: pan-y;
         height: 100vh; height: 100dvh; overflow: hidden;
       }
       body {
@@ -88,9 +96,11 @@
         background: var(--bg);
         color: var(--ink);
         font-family: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Hiragino Sans", sans-serif;
-        /* ゲームアプリなので画面全体でブラウザのズーム系ジェスチャを無効化する。
-           一覧の縦スクロールは #view-list 側の touch-action: pan-y が担う（そちらは変更しない） */
-        touch-action: none;
+        /* 縦スクロールは各画面のコンテナ（#view-list / #view-game）が担う。
+           body 自体に touch-action: none を付けると、ボタンやカードの上から
+           スクロールが始められなくなるため、ここも pan-y にそろえる。
+           touch-action: none は盤面（#board とセル）だけに限定する */
+        touch-action: pan-y;
         overscroll-behavior: none;
         height: 100vh; height: 100dvh; overflow: hidden;
       }
@@ -246,6 +256,23 @@
       .chip.locked .cno { font-size: .98rem; font-weight: 900; line-height: 1.1; }
       .chip.locked .clock { font-size: .78rem; line-height: 1.1; }
       .chip.sel { outline: 3px solid var(--accent); outline-offset: 1px; }
+      /* 番号チップ下端の難易度★（絶対配置なのでチップの大きさ・レイアウトは変わらない）。
+         クリア済みチップは左下の番号と重ならないよう右寄せにする */
+      .chip .cstars {
+        position: absolute; left: 0; right: 0; bottom: 3px; text-align: center;
+        font-size: .52rem; line-height: 1; letter-spacing: .02em; pointer-events: none;
+      }
+      .chip.done .cstars { left: auto; right: 4px; text-align: right; }
+
+      /* 難易度★の色（段階ごとに変える。空き★は薄くする） */
+      .dstars { font-weight: 900; letter-spacing: .04em; white-space: nowrap; }
+      .dstars .dempty { opacity: .35; }
+      .dstars.dt1 { color: var(--accent); }
+      .dstars.dt2 { color: var(--diff2); }
+      .dstars.dt3 { color: var(--diff3); }
+      .dstars.dt4 { color: var(--diff4); }
+      /* プレイ画面ヘッダーの問題名の横に出す★（ヘッダーの固定高さは変えない） */
+      .ghead .pname .pstars { font-size: .82rem; margin-left: 7px; vertical-align: 2px; }
 
       /* 問題の詳細パネル（チップをタップすると一覧の下に出る） */
       .pdetail { margin-top: 6px; }
@@ -340,10 +367,16 @@
         -webkit-tap-highlight-color: transparent; background: var(--tray);
         overscroll-behavior: none;
       }
-      /* ズーム抑止をタップ対象すべてに確実に効かせる：盤面コンテナだけでなく、
-         セル本体とその子要素（✘・リスの画像）、ボタン類にも touch-action: none を指定する */
-      button, .btn, .chip, .continue-btn, .ghead2,
-      .cell, .cell *, .mini-cell, .mini-cell * { touch-action: none; }
+      /* スクロールできる画面では、どの要素の上からでも縦スクロールが始まるようにする：
+         一覧・プレイ画面の全要素に pan-y を明示する（以前はボタン類・番号チップ・
+         ルール図解のミニセルにも touch-action: none が効いていて、その上からだと
+         トップページがスクロールできなかった）。
+         touch-action: none（スクロール・ズーム抑止）は盤面の中だけに限定する。
+         盤面側は ID を2つ重ねた指定で pan-y より優先させ、従来の操作感を保つ */
+      #view-list, #view-list *,
+      #view-game, #view-game * { touch-action: pan-y; }
+      #view-game #board, #view-game #board * { touch-action: none; }
+      .cell, .cell * { touch-action: none; }
       .cell {
         position: relative; display: flex; align-items: center; justify-content: center;
         /* 全サイズで正方形を保証する：トラックは minmax(0,1fr) で均等割りし、セル自体にも 1:1 を指定。
@@ -1037,6 +1070,225 @@
         }
       }
 
+      /* ================= 難易度（ソルバーの探索量から端末側で計算） =================
+         マスの数ではなく「実際に解くときの手強さ」で4段階に分ける。
+         初期盤面（リス0匹）から、色・横列・縦列の候補が1つに絞れたら置く、という
+         論理の伝播だけで解き切れる問題は「やさしい」。伝播が止まったら試し置き
+         （バックトラック探索）が必要になり、その回数（guesses）・失敗数
+         （backtracks）・深さ（maxDepth）からスコアを作る：
+           スコア S = guesses + backtracks + 3 × maxDepth
+         段階は絶対スコアと「1色あたりのスコア（S ÷ サイズ）」の両方で決め、
+         悪い方を採る。小さい盤面でも試し置きが多ければ段階が上がるので、
+         7マスの問題16・17のような「小さいけど難しい」問題も高く出る。
+         較正（内蔵25問）：問題9（S=56）は最上位「とてもむずかしい」、
+         問題16（S=25）・17（S=22）は7マスながら「むずかしい」に入る。
+         探索が上限（ノード数・時間）を超えたら判定不能として最上位に倒す。
+         結果は問題番号＋盤面ハッシュで localStorage にキャッシュし、
+         起動直後は一覧の裏で1問ずつ計算してチップの★を後から足す */
+      var DIFF_KEY = "risu-difficulty-v1";
+      var DIFF_LABELS = ["", "やさしい", "ふつう", "むずかしい", "とてもむずかしい"];
+      var diffCache = null; // 問題番号 -> {h: 盤面ハッシュ, t: 段階1〜4}
+      function diffHash(p){
+        var s = p.size + ":" + p.map.join("/") + ":" + (p.hard ? "h" : "");
+        var h = 0;
+        for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+        return h;
+      }
+      function loadDiffCache(){
+        if (diffCache) return diffCache;
+        diffCache = {};
+        try {
+          var raw = window.localStorage.getItem(DIFF_KEY);
+          if (raw){
+            var obj = JSON.parse(raw);
+            if (obj && typeof obj === "object") diffCache = obj;
+          }
+        } catch (e) { /* 読めなくても計算し直せばよい */ }
+        return diffCache;
+      }
+      function saveDiffCache(){
+        try { window.localStorage.setItem(DIFF_KEY, JSON.stringify(diffCache)); } catch (e) { /* 保存できなくても表示は続ける */ }
+      }
+      /* キャッシュ済みの段階だけを返す（計算はしない）。チップ表示用 */
+      function peekDifficulty(idx){
+        var p = PUZZLES[idx]; if (!p) return null;
+        var no = problemNoOf(p); if (no == null) return null;
+        var ent = loadDiffCache()[no];
+        return (ent && ent.h === diffHash(p) && ent.t >= 1 && ent.t <= 4) ? ent.t : null;
+      }
+      /* 段階を返す。未計算ならその場で計算してキャッシュする */
+      function difficultyOf(idx){
+        var hit = peekDifficulty(idx);
+        if (hit) return hit;
+        var p = PUZZLES[idx];
+        var tier = 2;
+        try { tier = computeDifficulty(p); } catch (e) { tier = 2; }
+        var no = problemNoOf(p);
+        if (no != null){
+          loadDiffCache()[no] = { h: diffHash(p), t: tier };
+          saveDiffCache();
+        }
+        return tier;
+      }
+      function diffStarsText(tier){
+        return "★★★★".slice(0, tier) + "☆☆☆☆".slice(0, 4 - tier);
+      }
+      function diffStarsHTML(tier){
+        return '<span class="dstars dt' + tier + '">'
+          + "★★★★".slice(0, tier)
+          + '<span class="dempty">' + "☆☆☆☆".slice(0, 4 - tier) + "</span></span>";
+      }
+      /* 難易度計算の本体：問題データだけから解く（現在のプレイ状態には依存しない）。
+         戻り値は段階 1〜4 */
+      function computeDifficulty(p){
+        var N = p.size;
+        var region = p.map.map(function(row){ return row.split(""); });
+        var letters = "ABCDEFGHIJKL".slice(0, N).split("");
+        var nodes = 0, guesses = 0, backtracks = 0, maxDepth = 0, aborted = false;
+        var startMs = Date.now();
+        var NODE_CAP = 6000;
+        function placedList(assigned){
+          var out = [];
+          letters.forEach(function(ch){ if (assigned[ch]) out.push(assigned[ch]); });
+          return out;
+        }
+        /* assigned（色→マス）を前提にした、未確定の色ごとの候補マス */
+        function cands(assigned){
+          var placed = placedList(assigned), dom = {};
+          letters.forEach(function(ch){
+            if (assigned[ch]) return;
+            var arr = [];
+            for (var r = 0; r < N; r++) for (var c = 0; c < N; c++){
+              if (region[r][c] !== ch) continue;
+              var elim = false;
+              for (var i = 0; i < placed.length; i++){
+                var pl = placed[i];
+                if (r === pl[0] || c === pl[1]
+                  || (Math.abs(r - pl[0]) <= 1 && Math.abs(c - pl[1]) <= 1)){ elim = true; break; }
+              }
+              if (!elim) arr.push([r, c]);
+            }
+            dom[ch] = arr;
+          });
+          return dom;
+        }
+        /* 論理の伝播：候補が1つだけの色／横列／縦列は「そこに置くしかない」として
+           確定させていく。矛盾したら null、全部確定したら assigned のコピー、
+           どちらでもなければ止まった時点の assigned のコピーを返す */
+        function propagate(assigned){
+          var cur = {}, ch, i, r, c;
+          letters.forEach(function(k){ if (assigned[k]) cur[k] = assigned[k]; });
+          while (true){
+            var dom = cands(cur);
+            for (ch in dom) if (!dom[ch].length) return null;
+            if (Object.keys(cur).length >= N) return cur;
+            var forced = null;
+            for (i = 0; i < letters.length; i++){
+              ch = letters[i];
+              if (dom[ch] && dom[ch].length === 1){ forced = [ch, dom[ch][0]]; break; }
+            }
+            if (!forced){
+              var placed = placedList(cur);
+              var usedColor = {};
+              letters.forEach(function(k){ if (cur[k]) usedColor[k] = true; });
+              function viable(rr, cc){
+                if (usedColor[region[rr][cc]]) return false;
+                for (var j = 0; j < placed.length; j++){
+                  var pl = placed[j];
+                  if (rr === pl[0] || cc === pl[1]
+                    || (Math.abs(rr - pl[0]) <= 1 && Math.abs(cc - pl[1]) <= 1)) return false;
+                }
+                return true;
+              }
+              for (r = 0; r < N && !forced; r++){
+                var rowUsed = false;
+                placed.forEach(function(pl){ if (pl[0] === r) rowUsed = true; });
+                if (rowUsed) continue;
+                var cells = [];
+                for (c = 0; c < N; c++) if (viable(r, c)) cells.push([r, c]);
+                if (!cells.length) return null;
+                if (cells.length === 1) forced = [region[cells[0][0]][cells[0][1]], cells[0]];
+              }
+              for (c = 0; c < N && !forced; c++){
+                var colUsed = false;
+                placed.forEach(function(pl){ if (pl[1] === c) colUsed = true; });
+                if (colUsed) continue;
+                var cells2 = [];
+                for (r = 0; r < N; r++) if (viable(r, c)) cells2.push([r, c]);
+                if (!cells2.length) return null;
+                if (cells2.length === 1) forced = [region[cells2[0][0]][cells2[0][1]], cells2[0]];
+              }
+            }
+            if (!forced) return cur;
+            cur[forced[0]] = forced[1];
+          }
+        }
+        /* 試し置き探索：伝播で止まったら、候補が一番少ない色から分岐する */
+        function dfs(assigned, depth){
+          if (aborted) return null;
+          nodes++;
+          if (nodes > NODE_CAP || ((nodes & 63) === 0 && Date.now() - startMs > 2500)){
+            aborted = true; return null;
+          }
+          var prop = propagate(assigned);
+          if (!prop){ backtracks++; return null; }
+          if (Object.keys(prop).length >= N) return prop;
+          var dom = cands(prop);
+          var bestCh = null, bestList = null;
+          letters.forEach(function(ch){
+            if (!dom[ch]) return;
+            if (!bestList || dom[ch].length < bestList.length){ bestCh = ch; bestList = dom[ch]; }
+          });
+          if (!bestCh) return prop;
+          guesses++;
+          if (depth + 1 > maxDepth) maxDepth = depth + 1;
+          for (var t = 0; t < bestList.length; t++){
+            var nxt = {}, k2;
+            for (k2 in prop) nxt[k2] = prop[k2];
+            nxt[bestCh] = bestList[t];
+            var res = dfs(nxt, depth + 1);
+            if (res) return res;
+            if (aborted) return null;
+          }
+          backtracks++;
+          return null;
+        }
+        var solved = dfs({}, 0);
+        if (aborted || !solved) return 4; // 上限超え・想定外は最上位に倒す
+        var tier;
+        if (guesses === 0){
+          tier = 1; // 論理の伝播だけで解けた
+        } else {
+          var S = guesses + backtracks + 3 * maxDepth;
+          var per = S / N;
+          var absTier = S >= 40 ? 4 : (S >= 30 ? 3 : (S >= 10 ? 2 : 1));
+          var perTier = per >= 4 ? 4 : (per >= 2 ? 3 : (per >= 1 ? 2 : 1));
+          tier = Math.max(absTier, perTier);
+        }
+        /* シート側で「難しい」とタグ付けされた問題は、計算結果が低くても
+           「むずかしい」未満にはしない（生成時に手強さで選ばれた問題のため） */
+        if (p.hard && tier < 3) tier = 3;
+        return tier;
+      }
+      /* 一覧の裏で1問ずつ難易度を計算し、済んだらチップの★を足して描き直す。
+         起動を重くしないよう、1回に1問だけ・タイマーで間隔を空けて進める */
+      var diffSweepTimer = null;
+      var diffSweepSeen = {}; // このセッションで計算を試した idx（キャッシュできない問題での無限ループ防止）
+      function scheduleDifficultySweep(){
+        if (diffSweepTimer) return;
+        diffSweepTimer = setTimeout(function(){
+          diffSweepTimer = null;
+          for (var i = 0; i < PUZZLES.length; i++){
+            if (peekDifficulty(i) || diffSweepSeen[i]) continue;
+            diffSweepSeen[i] = true;
+            difficultyOf(i);
+            if (!$("view-list").classList.contains("hidden")) renderList();
+            scheduleDifficultySweep();
+            return;
+          }
+        }, 80);
+      }
+
       function fmt(sec){
         var m = Math.floor(sec / 60), s = Math.floor(sec % 60);
         return m + ":" + (s < 10 ? "0" : "") + s;
@@ -1067,9 +1319,10 @@
             + '<button class="continue-btn sub" id="btn-continue" type="button">さいしょから もう一度あそぶ</button>';
         } else if (target >= 0){
           var tp = PUZZLES[target];
+          var tdt = difficultyOf(target);
           ch = '<button class="continue-btn" id="btn-continue" type="button">'
             + '<span class="cb-main">▶ つづきからはじめる</span>'
-            + '<span class="cb-sub">' + tp.name + '（' + tp.size + '×' + tp.size + '）</span></button>';
+            + '<span class="cb-sub">' + tp.name + '（' + tp.size + '×' + tp.size + '）／ 難易度：' + DIFF_LABELS[tdt] + ' ' + diffStarsText(tdt) + '</span></button>';
         }
         $("continue-area").innerHTML = ch;
         var cb = $("btn-continue");
@@ -1111,16 +1364,19 @@
             g.items.forEach(function(i){
               var p = PUZZLES[i], isOpen = i < unlocked, done = !!clearedFlag[i];
               var no = problemNoOf(p); if (no == null) no = i + 1;
+              var dtier = peekDifficulty(i);
+              var dlabel = dtier ? '、難易度：' + DIFF_LABELS[dtier] : '';
+              var dstars = dtier ? '<span class="cstars" aria-hidden="true">' + diffStarsHTML(dtier) + '</span>' : '';
               if (!isOpen){
                 html += '<button class="chip locked" type="button" disabled aria-label="問題' + no + '（まだ開いていません）">'
                   + '<span class="cno">' + no + '</span><span class="clock" aria-hidden="true">🔒</span></button>';
               } else if (done){
-                html += '<button class="chip done' + (i === selectedIdx ? " sel" : "") + '" type="button" data-p="' + i + '" aria-label="問題' + no + '（クリア済み）">'
+                html += '<button class="chip done' + (i === selectedIdx ? " sel" : "") + '" type="button" data-p="' + i + '" aria-label="問題' + no + '（クリア済み' + dlabel + '）">'
                   + '<img src="data:image/png;base64,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" alt="" draggable="false" />'
-                  + '<span class="cno">' + no + '</span><span class="cdone" aria-hidden="true">✓</span></button>';
+                  + '<span class="cno">' + no + '</span><span class="cdone" aria-hidden="true">✓</span>' + dstars + '</button>';
               } else {
-                html += '<button class="chip' + (i === selectedIdx ? " sel" : "") + '" type="button" data-p="' + i + '" aria-label="問題' + no + '">'
-                  + '<span class="cno-big">' + no + '</span></button>';
+                html += '<button class="chip' + (i === selectedIdx ? " sel" : "") + '" type="button" data-p="' + i + '" aria-label="問題' + no + dlabel + '">'
+                  + '<span class="cno-big">' + no + '</span>' + dstars + '</button>';
               }
             });
             html += '</div>';
@@ -1147,6 +1403,7 @@
         }
         renderDetail();
         refreshSheetRankings(false);
+        scheduleDifficultySweep();
       }
 
       /* チップをタップした問題の詳細（サイズ・1位タイム・ランキング・あそぶボタン） */
@@ -1164,9 +1421,11 @@
             if (e.name === myName && (myBest === null || e.sec < myBest)) myBest = e.sec;
           });
         }
+        var dtier2 = difficultyOf(i);
         el.innerHTML = '<div class="panel pdetail">'
           + '<h2>' + p.name + '（' + p.size + '×' + p.size + '）'
           + (p.hard ? '<span class="hardtag">小さいけど難しい</span>' : '') + '</h2>'
+          + '<p>難易度：<b>' + DIFF_LABELS[dtier2] + '</b> ' + diffStarsHTML(dtier2) + '</p>'
           + '<p>リス ' + p.size + '匹 ／ 色 ' + p.size + '色'
           + (clearedFlag[i] ? ' ／ クリア済み ✓' : '')
           + (myBest !== null ? ' ／ 自分のベスト ' + fmt(myBest) : '')
@@ -1458,7 +1717,10 @@
         $("clear-banner").classList.add("hidden");
         $("clear-banner").classList.remove("show");
         $("panel-fail").classList.add("hidden");
-        $("g-pname").textContent = p.name + "（" + N + "×" + N + "）";
+        var gtier = difficultyOf(idx);
+        $("g-pname").innerHTML = escapeHtml(p.name) + "（" + N + "×" + N + "）"
+          + '<span class="pstars dstars dt' + gtier + '" title="難易度：' + DIFF_LABELS[gtier] + '">'
+          + "★★★★".slice(0, gtier) + '<span class="dempty">' + "☆☆☆☆".slice(0, 4 - gtier) + "</span></span>";
         setMsg("ダブルタップでリスを置いてみよう。1マスだけの色は確定だよ", "");
         buildBoard();
         renderGameRank();
