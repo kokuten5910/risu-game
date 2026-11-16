@@ -578,6 +578,103 @@
           0 1px 1px var(--tile-drop);
       }
 
+      /* 仮置きモード：ハートを減らさずに試し置きして破綻を検討するレイヤー。
+         仮のものはどれも「薄く・点線・半透明」で、本置きと一目で区別する */
+      /* 仮置きのON/OFFはヘッダー上段の小さなアイコンボタン（テキストなし）。
+         2.75rem四方で上段の高さに収め、問題名が縮むだけでタイマー・ハートは動かない */
+      .ghead #btn-tent-toggle {
+        flex: 0 0 2.75rem; width: 2.75rem; min-width: 2.75rem; max-width: 2.75rem;
+        height: 2.75rem; min-height: 2.75rem; max-height: 2.75rem;
+        padding: 0; display: flex; align-items: center; justify-content: center;
+        border-radius: 10px;
+      }
+      .ghead #btn-tent-toggle .tent-icon {
+        position: relative; width: 32px; height: 32px; flex: none; pointer-events: none;
+        border: 2px dashed var(--accent); border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        background: var(--surface);
+      }
+      .ghead #btn-tent-toggle .tent-icon img {
+        width: 24px; height: 24px; object-fit: contain; opacity: .55; display: block;
+      }
+      .ghead #btn-tent-toggle .tent-icon-badge {
+        position: absolute; top: -5px; right: -8px;
+        background: var(--surface); color: var(--accent);
+        border: 1.5px solid var(--accent); border-radius: 999px;
+        font-size: 9px; font-weight: 900; line-height: 1.3; padding: 0 3px;
+      }
+      /* ON状態：ボタン全体をアクセント色で塗り、輪とバッジも反転して一目で分かるようにする */
+      #btn-tent-toggle.tent-on { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+      #btn-tent-toggle.tent-on .tent-icon { border-color: var(--accent-ink); background: rgba(255,255,255,.18); }
+      #btn-tent-toggle.tent-on .tent-icon img { opacity: .95; }
+      #btn-tent-toggle.tent-on .tent-icon-badge { background: var(--accent-ink); color: var(--accent); border-color: var(--accent-ink); }
+      .board.tent-on { outline: 3px dashed var(--accent); outline-offset: 3px; }
+      .tentactions {
+        display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+        margin-top: 8px; flex: none;
+        background: var(--surface); border: 1.5px dashed var(--accent); border-radius: 12px;
+        padding: 8px 10px;
+      }
+      .tentactions .tent-warn { flex: 1 1 100%; font-size: .8rem; font-weight: 700; color: var(--danger); line-height: 1.5; }
+      .tentactions .btn { flex: 1 1 40%; }
+      /* 仮リス：半透明＋点線の輪＋「仮」バッジ */
+      .cell.is-tent-found {
+        box-shadow:
+          0 2px 3px var(--tile-drop),
+          0 1px 0 rgba(84,62,18,.22),
+          inset 0 3px 0 rgba(255,255,255,.30),
+          inset 0 -3px 0 rgba(70,45,0,.08);
+      }
+      .cell.is-tent-found::after {
+        content: ""; position: absolute; inset: 3px; z-index: 2; pointer-events: none;
+        border: 2px dashed rgba(255,255,255,.95); border-radius: inherit;
+        filter: drop-shadow(0 0 1px rgba(35,30,16,.9)) drop-shadow(0 0 1px rgba(35,30,16,.9));
+      }
+      .cell .mk-sq.tent { opacity: .55; }
+      .cell .tent-badge {
+        position: absolute; top: 2px; right: 2px; z-index: 3; pointer-events: none;
+        background: var(--surface); color: var(--accent);
+        border: 1.5px solid var(--accent); border-radius: 999px;
+        font-size: 10px; font-weight: 900; line-height: 1.4; padding: 0 4px;
+      }
+      /* 仮✘：沈みは本置きの自動✘（40%）よりさらに薄く（手動22%／自動12%）、
+         ストライプも淡くして「仮」だと分かるようにする */
+      .cell.is-tent-dead-manual {
+        box-shadow:
+          inset 0 0 0 999px rgba(33,29,19,.22),
+          0 1px 1px var(--tile-drop),
+          inset 0 0 0 1px rgba(0,0,0,.15);
+      }
+      .cell.is-tent-dead-auto {
+        box-shadow:
+          inset 0 0 0 999px rgba(33,29,19,.12),
+          0 1px 1px var(--tile-drop),
+          inset 0 0 0 1px rgba(0,0,0,.10);
+      }
+      .cell.is-tent-dead-manual::after, .cell.is-tent-dead-auto::after {
+        content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+        border-radius: inherit;
+      }
+      .cell.is-tent-dead-manual::after {
+        background: repeating-linear-gradient(45deg, rgba(24,20,12,.10) 0 5px, rgba(24,20,12,0) 5px 10px);
+      }
+      .cell.is-tent-dead-auto::after {
+        background: repeating-linear-gradient(45deg, rgba(24,20,12,.06) 0 5px, rgba(24,20,12,0) 5px 10px);
+      }
+      .cell .mk-x.tent { opacity: .72; font-weight: 400; }
+      /* 破綻した色の進捗チップ：赤枠で点滅させる */
+      .chips .chip.broken {
+        outline: 3px solid var(--danger); outline-offset: 1px;
+        animation: chipblink .85s ease-in-out infinite;
+      }
+      @keyframes chipblink {
+        0%, 100% { box-shadow: 0 0 0 3px rgba(192,57,43,.45); }
+        50% { box-shadow: 0 0 0 6px rgba(192,57,43,.12); opacity: .6; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .chips .chip.broken { animation: none; box-shadow: 0 0 0 3px rgba(192,57,43,.45); }
+      }
+
       /* 結果パネル・ランキング */
       .panel {
         background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
@@ -686,6 +783,7 @@
             <b>タップ</b> ✘メモ（もう一度タップで消える）<br />
             <b>指を滑らせる</b> なぞったマスにまとめて✘<br />
             <b>ダブルタップ</b> リスを置く（置いたリスをダブルタップで取り消し）<br />
+            <b>仮置きモード</b> プレイ画面の上のアイコン（半透明のリス）でONにすると、ハートを減らさずにリスを試し置きして、破綻するかどうか検討できる<br />
             まちがえるとハートが減って、0になるとやり直しだよ
           </div>
         </div>
@@ -701,6 +799,7 @@
         <div class="ghead">
           <div class="ghead-row ghead-row-top">
             <span class="pname" id="g-pname">問題1</span>
+            <button class="btn" id="btn-tent-toggle" type="button" aria-pressed="false" aria-label="仮置きモード" title="仮置きモード"><span class="tent-icon" aria-hidden="true"><img src="data:image/png;base64,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" alt="" draggable="false" /><span class="tent-icon-badge">仮</span></span></button>
             <button class="btn" id="btn-back" type="button">問題一覧へ</button>
           </div>
           <div class="ghead-row ghead-row-sub">
@@ -728,6 +827,11 @@
         <div class="gfoot">
           <button class="btn" id="btn-restart" type="button">最初からやり直す</button>
           <button class="btn" id="btn-clearx" type="button">✘を全部消す</button>
+        </div>
+        <div class="tentactions hidden" id="tent-actions">
+          <span class="tent-warn">仮置き中だよ（ハートは減らない）。「本置きする」と、間違えた仮リスは通常どおりハートが1つ減るよ。</span>
+          <button class="btn" id="btn-tent-cancel" type="button">元に戻す</button>
+          <button class="btn primary" id="btn-tent-commit" type="button">本置きする</button>
         </div>
 
         <div class="panel hidden" id="panel-clear">
@@ -1005,6 +1109,10 @@
       var popKey = null;              // 置いた瞬間の1匹だけポヨンさせる対象マス "r,c"（描画したら消す）
       var hintPulse = {};             // ヒントで付けた✘のうち、いま光っている（脈打ち＋💡）マス "r,c" -> true
       var hintFrame = {};             // ヒントで付けた✘のマス "r,c" -> true（操作後は細い金枠だけ残す）
+      var tentativeMode = false;      // 仮置きモード中か（ONの間だけ仮レイヤーが有効）
+      var tentState = [];             // 仮レイヤー [r][c]：0:なし 1:仮の手動✘ 2:仮の自動✘ 3:仮リス（本置きの cellState には一切触れない）
+      var brokenInfo = null;          // 破綻中の対象 {type:"color"|"row"|"col", key, label}（なければ null）
+      var tentTap = null;             // {r,c,time} 仮リスのマスへのタップ候補（ダブルタップで取り消し）
       var hintFocus = null;           // 直近の変化（ヒントで付けた✘／置かれたリス）のマスと、その色・横列・縦列。
                                       // 論理ヒントのティア内並び替えで「前の結果からつながる推理」を優先するために使う
 
@@ -1702,6 +1810,10 @@
         hearts = 3; placed = 0; playing = true; registered = false; hintCount = 0; hintPenalty = 0; clearOfficialSec = 0; lastClearEntry = null;
         hintPulse = {}; hintFrame = {};
         hintFocus = null;
+        /* 問題を切り替える／リトライしたら仮レイヤーは破棄する */
+        tentativeMode = false; brokenInfo = null; tentTap = null; pendingTap = null; drag = null;
+        initTentState();
+        updateTentUI();
         renderPenalty(false);
         $("reg-name").value = loadName();
         $("reg-row").classList.remove("hidden");
@@ -1758,6 +1870,7 @@
           var r = parseInt(cells[i].getAttribute("data-r"), 10);
           var c = parseInt(cells[i].getAttribute("data-c"), 10);
           var st = cellState[r][c];
+          var tst = (tentState[r] && typeof tentState[r][c] === "number") ? tentState[r][c] : 0;
           /* ヒントの目印は「ヒントで付けた手動✘」にだけ付く。✘が消えたりリスになったマスからは目印も外す */
           var hk = key(r, c);
           if (st !== 1 && (hintFrame[hk] || hintPulse[hk])){ delete hintFrame[hk]; delete hintPulse[hk]; }
@@ -1765,23 +1878,32 @@
           var isHintFrame = st === 1 && !!hintFrame[hk] && !isHintPulse;
           var inner = "";
           if (st === 3) inner = '<img class="mk-sq' + (popKey === key(r, c) ? " pop" : "") + '" src="data:image/png;base64,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" alt="詰め込みリス" draggable="false" />';
+          else if (tst === 3) inner = '<img class="mk-sq tent" src="data:image/png;base64,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" alt="仮のリス" draggable="false" /><span class="tent-badge" aria-hidden="true">仮</span>';
           else if (st === 1) inner = '<span class="mk-x" style="font-size:' + xSize + 'px">✕</span>';
           else if (st === 2) inner = '<span class="mk-x auto" style="font-size:' + Math.floor(xSize * 0.78) + 'px">✕</span>';
+          else if (tst === 1) inner = '<span class="mk-x tent" style="font-size:' + Math.floor(xSize * 0.8) + 'px">✕</span>';
+          else if (tst === 2) inner = '<span class="mk-x tent auto" style="font-size:' + Math.floor(xSize * 0.62) + 'px">✕</span>';
           if (isHintPulse) inner += '<span class="hint-badge" aria-hidden="true">💡</span>';
           cells[i].innerHTML = inner;
           /* 状態クラス：✘マスは背景だけを沈め（is-dead-*）、残りマスは鮮やか＋ツヤ（is-alive）にして一目で見分ける。
-             手動✘のほうが自動✘より深く沈むので、濃さの区別も保たれる */
-          cells[i].classList.toggle("is-alive", st === 0);
+             手動✘のほうが自動✘より深く沈むので、濃さの区別も保たれる。
+             仮レイヤーは本置きが空（st===0）のマスにだけ重ね、沈みも仮専用の薄いものにする */
+          cells[i].classList.toggle("is-alive", st === 0 && tst === 0);
           cells[i].classList.toggle("is-dead-manual", st === 1);
           cells[i].classList.toggle("is-dead-auto", st === 2);
           cells[i].classList.toggle("is-found", st === 3);
+          cells[i].classList.toggle("is-tent-found", st === 0 && tst === 3);
+          cells[i].classList.toggle("is-tent-dead-manual", st === 0 && tst === 1);
+          cells[i].classList.toggle("is-tent-dead-auto", st === 0 && tst === 2);
           cells[i].classList.toggle("hint-pulse", isHintPulse);
           cells[i].classList.toggle("hint-frame", isHintFrame);
         }
         $("g-hearts").innerHTML = [0,1,2].map(function(i){
           return i < hearts ? "♥" : '<span class="off">♥</span>';
         }).join("");
-        $("g-progress").textContent = "リス " + placed + " / " + N + " 匹";
+        var tentCount = 0;
+        if (tentState.length === N) for (var tr = 0; tr < N; tr++) for (var tc = 0; tc < N; tc++) if (tentState[tr][tc] === 3) tentCount++;
+        $("g-progress").textContent = "リス " + placed + " / " + N + " 匹" + (tentativeMode ? "（仮 " + tentCount + " 匹）" : "");
         renderChips();
         popKey = null; // ポヨンは置いた瞬間の描画1回だけ。以後の再描画では再生しない
       }
@@ -1801,7 +1923,8 @@
               + '<img src="data:image/png;base64,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" alt="' + colorName(ch) + 'のリス（見つけた）" draggable="false" /><span class="ck">✓</span></span>';
           } else {
             left++;
-            html += '<span class="chip" style="background:' + pal[ch] + ';border:1.5px solid ' + tileEdge(pal[ch]) + '" title="' + colorName(ch) + '（まだ）"></span>';
+            var brk = (brokenInfo && brokenInfo.type === "color" && brokenInfo.key === ch) ? " broken" : "";
+            html += '<span class="chip' + brk + '" style="background:' + pal[ch] + ';border:1.5px solid ' + tileEdge(pal[ch]) + '" title="' + colorName(ch) + (brk ? '（破綻：置けるマスがない）' : '（まだ）') + '"></span>';
           }
         });
         $("g-chips").innerHTML = html;
@@ -1958,6 +2081,207 @@
         setMsg("リスを取り消したよ", "");
       }
 
+      /* ================= 仮置きモード =================
+         仮レイヤー（tentState）は本置き（cellState）と完全に分離する。
+         仮置き中は cellState・hearts・placed には一切触れず、クリア判定もしない。
+         タイマーだけは通常どおり進む（止めない） */
+      function initTentState(){
+        tentState = [];
+        for (var r = 0; r < N; r++) tentState.push(new Array(N).fill(0));
+      }
+
+      /* 仮置きモードの見た目（トグルの色・盤面の点線枠・「元に戻す／本置きする」・
+         ヒントボタンの無効化・✘全消しボタンの文言）をモードに合わせて切り替える */
+      function updateTentUI(){
+        var on = tentativeMode;
+        var tgl = $("btn-tent-toggle");
+        if (tgl){
+          tgl.classList.toggle("tent-on", on);
+          tgl.setAttribute("aria-pressed", on ? "true" : "false");
+          tgl.setAttribute("aria-label", on ? "仮置きモードをやめる" : "仮置きモード");
+          tgl.title = on ? "仮置きモードをやめる" : "仮置きモード";
+        }
+        var act = $("tent-actions");
+        if (act) act.classList.toggle("hidden", !on);
+        boardEl.classList.toggle("tent-on", on);
+        ["btn-hint-place", "btn-hint-logic", "btn-hint-random"].forEach(function(id){
+          var b = $(id); if (b) b.disabled = on; // 仮置き中はヒントと干渉させない
+        });
+        var cx = $("btn-clearx");
+        if (cx) cx.textContent = on ? "仮の✘を全部消す" : "✘を全部消す";
+      }
+
+      /* 仮の自動✘の再計算（本置きの recomputeAuto と同じ消去ルール。
+         仮リスから、同じ横列・縦列・同色・周囲8マスへ付ける。
+         本置きが空でないマスと、仮の手動✘・仮リスには重ねない） */
+      function recomputeTentAuto(){
+        var r, c, i, j;
+        for (r = 0; r < N; r++) for (c = 0; c < N; c++) if (tentState[r][c] === 2) tentState[r][c] = 0;
+        for (r = 0; r < N; r++) for (c = 0; c < N; c++){
+          if (tentState[r][c] !== 3) continue;
+          for (i = 0; i < N; i++){
+            if (cellState[r][i] === 0 && tentState[r][i] === 0) tentState[r][i] = 2;
+            if (cellState[i][c] === 0 && tentState[i][c] === 0) tentState[i][c] = 2;
+          }
+          for (i = 0; i < N; i++) for (j = 0; j < N; j++){
+            if (region[i][j] === region[r][c] && cellState[i][j] === 0 && tentState[i][j] === 0) tentState[i][j] = 2;
+          }
+          for (var dr = -1; dr <= 1; dr++) for (var dc = -1; dc <= 1; dc++){
+            var nr = r + dr, nc = c + dc;
+            if (nr >= 0 && nr < N && nc >= 0 && nc < N && cellState[nr][nc] === 0 && tentState[nr][nc] === 0) tentState[nr][nc] = 2;
+          }
+        }
+      }
+
+      /* 仮リスを (r,c) に置けるかのルール判定。本置き＋仮置きを通して、
+         同じ横列・縦列・同色にリスがいる／隣接している場合は置けない。
+         案内文は本置きの ruleViolation と同じ言い回しにする */
+      function tentRuleViolation(r, c){
+        function isSq(rr, cc){ return cellState[rr][cc] === 3 || tentState[rr][cc] === 3; }
+        for (var i = 0; i < N; i++){
+          if (isSq(r, i)) return "同じ横列に、もうリスがいるよ";
+          if (isSq(i, c)) return "同じ縦列に、もうリスがいるよ";
+        }
+        for (var a = 0; a < N; a++) for (var b = 0; b < N; b++){
+          if (isSq(a, b) && region[a][b] === region[r][c]) return "同じ色に、もうリスがいるよ";
+        }
+        for (var dr = -1; dr <= 1; dr++) for (var dc = -1; dc <= 1; dc++){
+          var nr = r + dr, nc = c + dc;
+          if (nr >= 0 && nr < N && nc >= 0 && nc < N && isSq(nr, nc)) return "リスの隣（ナナメも）には置けないよ";
+        }
+        return null;
+      }
+
+      /* 破綻の検出：本置き＋仮置きを合わせた盤面で、各色・各横列・各縦列の
+         候補マスを数え直す。候補の数え方はヒントの候補ロジック（domainsNow や
+         contradictionInfo の computeDomains）と同��消去ルール：
+         ✘（本置き・仮の両方）／置かれたリスと同じ横列・縦列・同色／周囲8マス を候補から外す。
+         候補が0の対象があれば {type, key, label} を、なければ null を返す。
+         優先順は色→横列→縦列（findZero と同じ） */
+      function computeTentBreakdown(){
+        var placedList = [], assignedColor = {}, rowHas = {}, colHas = {}, r, c;
+        for (r = 0; r < N; r++) for (c = 0; c < N; c++){
+          if (cellState[r][c] === 3 || tentState[r][c] === 3){
+            placedList.push([r, c]);
+            assignedColor[region[r][c]] = true; rowHas[r] = true; colHas[c] = true;
+          }
+        }
+        function isElim(rr, cc){
+          if (cellState[rr][cc] !== 0) return true;               // 本置きの✘・リス
+          if (tentState[rr][cc] !== 0) return true;               // 仮の✘・仮リス
+          for (var i = 0; i < placedList.length; i++){
+            var p = placedList[i];
+            if (rr === p[0] || cc === p[1]) return true;
+            if (region[rr][cc] === region[p[0]][p[1]]) return true;
+            if (Math.abs(rr - p[0]) <= 1 && Math.abs(cc - p[1]) <= 1) return true;
+          }
+          return false;
+        }
+        var letters = colorLetters(), i, rr, cc, arr;
+        for (i = 0; i < letters.length; i++){
+          var ch = letters[i];
+          if (assignedColor[ch]) continue;
+          arr = [];
+          for (rr = 0; rr < N; rr++) for (cc = 0; cc < N; cc++)
+            if (region[rr][cc] === ch && !isElim(rr, cc)) arr.push([rr, cc]);
+          if (!arr.length) return { type: "color", key: ch, label: colorName(ch) };
+        }
+        for (rr = 0; rr < N; rr++){
+          if (rowHas[rr]) continue;
+          arr = [];
+          for (cc = 0; cc < N; cc++) if (!isElim(rr, cc)) arr.push([rr, cc]);
+          if (!arr.length) return { type: "row", key: rr, label: rowLabel(rr) };
+        }
+        for (cc = 0; cc < N; cc++){
+          if (colHas[cc]) continue;
+          arr = [];
+          for (rr = 0; rr < N; rr++) if (!isElim(rr, cc)) arr.push([rr, cc]);
+          if (!arr.length) return { type: "col", key: cc, label: colLabel(cc) };
+        }
+        return null;
+      }
+
+      /* 仮置きを変えるたびに破綻を数え直し、警告（具体名＋チップの赤枠点滅）を出し入れする。
+         fallbackMsg は破綻でないときに出す通常メッセージ {text, kind}（省略可） */
+      function updateTentBreakdown(fallbackMsg){
+        var wasBroken = !!brokenInfo;
+        brokenInfo = tentativeMode ? computeTentBreakdown() : null;
+        if (brokenInfo){
+          setMsg("破綻しちゃった。" + brokenInfo.label + "のリスが置けなくなったよ", "bad");
+        } else if (wasBroken){
+          setMsg("破綻が解けたよ。候補が戻ったよ", "good");
+        } else if (fallbackMsg){
+          setMsg(fallbackMsg.text, fallbackMsg.kind || "");
+        }
+        paintAll();
+      }
+
+      function tryTentPlace(r, c){
+        if (!tentativeMode) return;
+        if (cellState[r][c] !== 0){
+          setMsg("そこは本置きで✘が付いているから、仮リスは置けないよ", "bad");
+          shakeBoard();
+          return;
+        }
+        var vio = tentRuleViolation(r, c);
+        if (vio){
+          setMsg(vio + "。ハートは減らないよ", "bad");
+          shakeBoard();
+          return;
+        }
+        tentState[r][c] = 3;
+        recomputeTentAuto();
+        updateTentBreakdown({ text: "仮リスを置いたよ。破綻しないか見てみてね", kind: "" });
+      }
+
+      function removeTentSquirrel(r, c){
+        if (!tentativeMode) return;
+        tentState[r][c] = 0;
+        recomputeTentAuto();
+        updateTentBreakdown({ text: "仮リスを取り消したよ", kind: "" });
+      }
+
+      function enterTentative(){
+        if (!playing || cur < 0) return;
+        if (tentState.length !== N) initTentState();
+        tentativeMode = true;
+        brokenInfo = null;
+        pendingTap = null; tentTap = null; drag = null;
+        updateTentUI();
+        paintAll();
+        setMsg("仮置きモードだよ。ダブルタップで仮リスを置いて、置いていって破綻しないか試してみよう。ハートは減らないよ", "");
+      }
+
+      /* 仮レイヤーを全部消してモードを抜ける。本置き盤面・ハート・タイマーには触れない */
+      function exitTentative(){
+        tentativeMode = false;
+        brokenInfo = null;
+        tentTap = null; pendingTap = null; drag = null;
+        initTentState();
+        updateTentUI();
+        paintAll();
+      }
+
+      function cancelTentative(){
+        exitTentative();
+        setMsg("仮置きを全部消して、モードを抜けたよ。本置きの盤面とハートはそのままだよ", "");
+      }
+
+      /* 仮リスを1匹ずつ本置きの通常判定（tryPlace）で確定してからモードを抜ける。
+         間違えた仮リスは通常どおりハート−1で、そのマスに✘が付く。
+         ハートが尽きたら tryPlace 側で失敗処理になり、残りの仮リスは確定しない */
+      function commitTentative(){
+        var list = [];
+        for (var r = 0; r < N; r++) for (var c = 0; c < N; c++)
+          if (tentState[r][c] === 3) list.push([r, c]);
+        exitTentative();
+        if (!list.length){
+          setMsg("仮リスがなかったので、そのまま仮置きモードを抜けたよ", "");
+          return;
+        }
+        list.forEach(function(rc){ if (playing) tryPlace(rc[0], rc[1]); });
+      }
+
       /* ================= ヒント ================= */
       /* ペナルティ累計の表示更新（ピルは固定幅なので、加算されてもヘッダーは動かない） */
       function renderPenalty(bump){
@@ -1995,7 +2319,7 @@
 
       /* (a) リスを確定：まだ見つかっていない色を1つ、正解マスに置く */
       function hintPlace(){
-        if (!playing || cur < 0) return;
+        if (!playing || cur < 0 || tentativeMode) return; // 仮置き中はヒント無効（ボタンも無効化済み）
         hintCount++;
         addPenalty(30); // リスを確定：+30秒
         var found = foundColorSet();
@@ -2320,7 +2644,7 @@
 上・左に近い順」の決定的な自然順にする（同じ盤面では毎回同じヒントになる）。
 どのティアの✘も、対象は pick()（ソルバーで「どの完成形にも入らない」と確認済みのマス）を通す（安全弁） */
 function hintLogic(){
-if (!playing || cur < 0) return;
+if (!playing || cur < 0 || tentativeMode) return; // 仮置き中はヒント無効（ボタンも無効化済み）
 hintCount++;
 addPenalty(10); // 論理ヒント：+10秒
 // 今の盤面と矛盾しない完成形が1つもない＝手動✘のどこかが間違っている
@@ -2838,7 +3162,7 @@ applyHintXs((genericCells.length? genericCells: (longCells.length? longCells: in
 
       /* (c) ランダム✘：正解でない空きマスから最大3マスに✘を付ける */
       function hintRandom(){
-        if (!playing || cur < 0) return;
+        if (!playing || cur < 0 || tentativeMode) return; // 仮置き中はヒント無効（ボタンも無効化済み）
         hintCount++;
         addPenalty(5); // ランダム✘：+5秒
         var pool = [];
@@ -2877,6 +3201,18 @@ applyHintXs((genericCells.length? genericCells: (longCells.length? longCells: in
         }
       }
 
+      /* 仮置き中のドラッグ✘：仮レイヤー側にだけ入れる（本置きが空のマスだけ。
+         本置きの✘・リスと仮リスは素通りする） */
+      function applyTentDragCell(r, c){
+        if (cellState[r][c] !== 0) return;
+        if (tentState[r][c] === 3) return; // 仮リスは素通り
+        if (drag.mode === "put"){
+          if (tentState[r][c] === 0 || tentState[r][c] === 2) tentState[r][c] = 1;
+        } else {
+          if (tentState[r][c] === 1) tentState[r][c] = 0;
+        }
+      }
+
       boardEl.addEventListener("pointerdown", function(e){
         if (cur < 0 || !playing) return;
         e.preventDefault();
@@ -2885,6 +3221,41 @@ applyHintXs((genericCells.length? genericCells: (longCells.length? longCells: in
         var r = pos.r, c = pos.c, st = cellState[r][c], now = Date.now();
         /* 盤面を操作したらヒントの光は止める（細い金枠だけ残る） */
         settleHintMarks();
+
+        /* ===== 仮置きモード中の操作：すべて仮レイヤー側だけを触る ===== */
+        if (tentativeMode){
+          var tst = tentState[r][c];
+          /* 仮リスのマス：ダブルタップで取り消し */
+          if (tst === 3){
+            if (tentTap && tentTap.r === r && tentTap.c === c && now - tentTap.time < 350){
+              tentTap = null;
+              removeTentSquirrel(r, c);
+            } else {
+              tentTap = { r: r, c: c, time: now };
+            }
+            drag = null;
+            return;
+          }
+          /* 本置きのリスは仮置き中も触れない */
+          if (st === 3){ drag = null; return; }
+          /* ダブルタップ判定：1回目の仮✘操作を取り消して仮リス配置へ */
+          if (pendingTap && pendingTap.tent && pendingTap.r === r && pendingTap.c === c && now - pendingTap.time < 350){
+            var prevTent = pendingTap.prevTent;
+            pendingTap = null;
+            drag = null;
+            tentState[r][c] = prevTent;
+            paintAll();
+            tryTentPlace(r, c);
+            return;
+          }
+          /* 通常のタップ／ドラッグ開始：仮✘を付け外しする */
+          var tmode = (tst === 1) ? "erase" : "put";
+          pendingTap = { r: r, c: c, time: now, prev: st, tent: true, prevTent: tst };
+          drag = { mode: tmode, moved: false, r: r, c: c, tent: true };
+          applyTentDragCell(r, c);
+          updateTentBreakdown(null); // 仮✘で候補が全部塞がれたら破綻を知らせる
+          return;
+        }
 
         /* リスのマス：ダブルタップで取り消し */
         if (st === 3){
@@ -2928,11 +3299,17 @@ applyHintXs((genericCells.length? genericCells: (longCells.length? longCells: in
         }
         if (pos.r === drag.lastR && pos.c === drag.lastC) return;
         drag.lastR = pos.r; drag.lastC = pos.c;
-        applyDragCell(pos.r, pos.c);
+        if (drag.tent) applyTentDragCell(pos.r, pos.c);
+        else applyDragCell(pos.r, pos.c);
         paintAll();
       });
 
-      function endDrag(){ drag = null; }
+      function endDrag(){
+        /* 仮置き中のドラッグが終わったら、まとめて破綻を数え直す */
+        var wasTentDrag = drag && drag.tent && drag.moved;
+        drag = null;
+        if (wasTentDrag && tentativeMode) updateTentBreakdown(null);
+      }
       boardEl.addEventListener("pointerup", endDrag);
       boardEl.addEventListener("pointercancel", endDrag);
       boardEl.addEventListener("contextmenu", function(e){ e.preventDefault(); });
@@ -2975,6 +3352,7 @@ applyHintXs((genericCells.length? genericCells: (longCells.length? longCells: in
       /* ================= ボタン ================= */
       function toList(){
         stopTimer(); playing = false; cur = -1;
+        tentativeMode = false; brokenInfo = null; tentState = []; tentTap = null; // 仮レイヤーは破棄する
         $("view-game").classList.add("hidden");
         $("view-list").classList.remove("hidden");
         renderList();
@@ -2988,10 +3366,29 @@ applyHintXs((genericCells.length? genericCells: (longCells.length? longCells: in
       $("btn-retry").addEventListener("click", function(){ if (cur >= 0) startProblem(cur); });
       $("btn-clearx").addEventListener("click", function(){
         if (!playing) return;
+        if (tentativeMode){
+          for (var r = 0; r < N; r++) for (var c = 0; c < N; c++) if (tentState[r][c] === 1) tentState[r][c] = 0;
+          recomputeTentAuto();
+          updateTentBreakdown({ text: "仮の✘を全部消したよ", kind: "" });
+          return;
+        }
         for (var r = 0; r < N; r++) for (var c = 0; c < N; c++) if (cellState[r][c] === 1) cellState[r][c] = 0;
         recomputeAuto();
         paintAll();
         setMsg("手で付けた✘を全部消したよ", "");
+      });
+      $("btn-tent-toggle").addEventListener("click", function(){
+        if (!playing || cur < 0) return;
+        if (tentativeMode) cancelTentative(); // トグルOFFは「元に戻す」と同じ（仮を全部消して抜ける）
+        else enterTentative();
+      });
+      $("btn-tent-cancel").addEventListener("click", function(){
+        if (!tentativeMode) return;
+        cancelTentative();
+      });
+      $("btn-tent-commit").addEventListener("click", function(){
+        if (!tentativeMode) return;
+        commitTentative();
       });
       $("btn-hint-place").addEventListener("click", hintPlace);
       $("btn-hint-logic").addEventListener("click", hintLogic);
