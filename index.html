@@ -1548,23 +1548,54 @@
       }
 
       /* 表示用ランキング：シート取得済みなら画面内とシート分を重複なしで合わせ、
-         未取得・取得失敗時は従来の画面内ランキングだけを返す */
+         未取得・取得失敗時は従来の画面内ランキングだけを使う。
+         そのうえで、同じ名前の記録は最速の1件だけに絞って返す（絞るのは表示だけ。
+         シートへの登録や元のデータは今までどおり全部残る） */
       function displayList(idx){
         var local = rankings[idx] || [];
-        if (!sheetRankings) return local.slice();
-        var merged = [], seen = {};
-        function addAll(list){
-          (list || []).forEach(function(e){
-            var k = e.name + "|" + e.sec + "|" + (typeof e.hints === "number" ? e.hints : "");
-            if (seen[k]) return;
-            seen[k] = true;
-            merged.push(e);
-          });
+        var merged;
+        if (!sheetRankings){
+          merged = local.slice();
+        } else {
+          merged = [];
+          var seen = {};
+          function addAll(list){
+            (list || []).forEach(function(e){
+              var k = e.name + "|" + e.sec + "|" + (typeof e.hints === "number" ? e.hints : "");
+              if (seen[k]) return;
+              seen[k] = true;
+              merged.push(e);
+            });
+          }
+          addAll(sheetRankings[idx]);
+          addAll(local);
         }
-        addAll(sheetRankings[idx]);
-        addAll(local);
-        merged.sort(function(a, b){ return a.sec - b.sec; });
-        return merged;
+        return bestPerName(merged);
+      }
+
+      /* 同じ名前の記録が複数ある場合、その人の最速の公式タイム（ヒントペナルティ込み）の
+         1件だけを残す。同タイムならヒント回数が少ない方、それも同じなら先に登録された方
+         （元の並びで前にある方）。残した記録は公式タイム順に並べ、ヒント回数の併記も
+         残した記録のものになる */
+      function bestPerName(list){
+        function hintsOf(e){ return typeof e.hints === "number" ? e.hints : Infinity; }
+        var best = {};
+        list.forEach(function(e, i){
+          var cur = best[e.name];
+          if (!cur){ best[e.name] = { e: e, i: i }; return; }
+          if (e.sec < cur.e.sec - 1e-9
+            || (Math.abs(e.sec - cur.e.sec) <= 1e-9 && hintsOf(e) < hintsOf(cur.e))){
+            best[e.name] = { e: e, i: i };
+          }
+        });
+        var kept = Object.keys(best).map(function(k){ return best[k]; });
+        kept.sort(function(a, b){
+          if (a.e.sec !== b.e.sec) return a.e.sec - b.e.sec;
+          var ha = hintsOf(a.e), hb = hintsOf(b.e);
+          if (ha !== hb) return ha - hb;
+          return a.i - b.i;
+        });
+        return kept.map(function(x){ return x.e; });
       }
 
       /* タイムアウト付き fetch（失敗しても例外を投げっぱなしにしない呼び出し側で処理する） */
